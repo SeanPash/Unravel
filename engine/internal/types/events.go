@@ -44,3 +44,27 @@ type ADEvent struct {
 	Target     string
 	Actor      string
 }
+
+type ProcessAccess struct {
+	EventID       string
+	TS            time.Time
+	Host          string
+	SourcePID     int
+	SourceImage   string
+	SourceUser    string
+	TargetPID     int
+	TargetImage   string
+	TargetUser    string
+	GrantedAccess string
+	CallTrace     string
+}
+
+type FileCreate struct {
+	EventID        string
+	TS             time.Time
+	Host           string
+	PID            int
+	Image          string
+	User           string
+	TargetFilename string
+}

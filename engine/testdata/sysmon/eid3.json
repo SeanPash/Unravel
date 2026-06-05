@@ -1,0 +1,21 @@
+{
+  "_time": "2026-06-05T19:31:00.000+00:00",
+  "host": "WS01",
+  "source": "WinEventLog:Microsoft-Windows-Sysmon/Operational",
+  "EventCode": "3",
+  "EventID": "3",
+  "UtcTime": "2026-06-05 19:31:00.000",
+  "ProcessGuid": "{abcd1234-0001-0000-0000-000000000001}",
+  "ProcessId": "4880",
+  "Image": "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+  "User": "NORTHPOLE\\jdoe",
+  "Protocol": "tcp",
+  "Initiated": "true",
+  "SourceIp": "192.168.56.20",
+  "SourceHostname": "WS01.northpole.local",
+  "SourcePort": "49812",
+  "DestinationIp": "203.0.113.42",
+  "DestinationHostname": "evil.example.com",
+  "DestinationPort": "443",
+  "DestinationPortName": "https"
+}
