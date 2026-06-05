@@ -1,0 +1,62 @@
+[
+  {
+    "type": "graph_update",
+    "payload": {
+      "nodes": [
+        { "id": "proc-winword", "kind": "Process", "label": "WINWORD.EXE", "attrs": { "pid": 4120, "host": "WS01", "ts": 1749100000 } },
+        { "id": "proc-powershell-1", "kind": "Process", "label": "powershell.exe", "attrs": { "pid": 4880, "host": "WS01", "ts": 1749100030 } }
+      ],
+      "edges": [
+        { "id": "edge-001", "src": "proc-winword", "dst": "proc-powershell-1", "kind": "spawned", "ts": 1749100030, "confidence": 0.72 }
+      ]
+    }
+  },
+  {
+    "type": "score_update",
+    "payload": { "edge_id": "edge-001", "score": 0.91 }
+  },
+  {
+    "type": "graph_update",
+    "payload": {
+      "nodes": [
+        { "id": "proc-lsass", "kind": "Process", "label": "lsass.exe", "attrs": { "pid": 688, "host": "WS01", "ts": 1749100060 } },
+        { "id": "user-admin", "kind": "User", "label": "NORTHPOLE\\Administrator", "attrs": { "host": "WS01", "ts": 1749100090 } },
+        { "id": "host-dc01", "kind": "Host", "label": "DC01", "attrs": { "ip": "192.168.56.10", "ts": 1749100090 } }
+      ],
+      "edges": [
+        { "id": "edge-002", "src": "proc-powershell-1", "dst": "proc-lsass", "kind": "dumped_memory_of", "ts": 1749100060, "confidence": 0.88 },
+        { "id": "edge-003", "src": "proc-powershell-1", "dst": "user-admin", "kind": "accessed_credential", "ts": 1749100075, "confidence": 0.85 },
+        { "id": "edge-004", "src": "user-admin", "dst": "host-dc01", "kind": "authenticated_as", "ts": 1749100090, "confidence": 0.93 }
+      ]
+    }
+  },
+  {
+    "type": "chain_result",
+    "payload": {
+      "confidence": 0.91,
+      "steps": [
+        { "event_id": "evt-001", "description": "WINWORD.EXE spawned powershell.exe on WS01", "confidence": 0.91, "ts": 1749100030 },
+        { "event_id": "evt-002", "description": "powershell.exe accessed lsass.exe memory (credential dump)", "confidence": 0.88, "ts": 1749100060 },
+        { "event_id": "evt-003", "description": "powershell.exe accessed NORTHPOLE\\Administrator credential material", "confidence": 0.85, "ts": 1749100075 },
+        { "event_id": "evt-004", "description": "NORTHPOLE\\Administrator authenticated to DC01 via Kerberos ticket", "confidence": 0.93, "ts": 1749100090 },
+        { "event_id": "evt-005", "description": "Domain admin logon to DC01 confirmed", "confidence": 0.96, "ts": 1749100120 }
+      ]
+    }
+  },
+  {
+    "type": "narration",
+    "payload": {
+      "text": "A macro-enabled Office document opened by a user on WS01 spawned PowerShell, which immediately accessed the LSASS process to dump credential material. The attacker used the extracted Kerberos ticket to authenticate to DC01 as a domain administrator, completing a pass-the-ticket lateral movement to the Domain Controller.",
+      "hypotheses": [
+        "Credential material may have been exfiltrated before network telemetry began capturing outbound traffic",
+        "Additional workstations may have been compromised using the same ticket before DC01 authentication was observed"
+      ],
+      "actions": [
+        "Isolate WS01 from the network immediately",
+        "Reset credentials for NORTHPOLE\\Administrator and all accounts with recent Kerberos activity from WS01",
+        "Search for lateral movement originating from DC01 after timestamp 1749100090",
+        "Revoke all active Kerberos tickets issued to WS01 in the affected window"
+      ]
+    }
+  }
+]
