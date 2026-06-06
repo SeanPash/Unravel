@@ -50,6 +50,8 @@ export interface MessageHandlers {
   onScoreUpdate(payload: ScoreUpdatePayload): void
   onChainResult(payload: ChainResultPayload): void
   onNarration(payload: NarrationPayload): void
+  onOpen?(): void
+  onClose?(): void
 }
 
 const INITIAL_RETRY_MS = 1_000
@@ -97,6 +99,7 @@ export class EngineSocket {
 
     ws.onopen = () => {
       this.retryDelay = INITIAL_RETRY_MS
+      this.handlers.onOpen?.()
     }
 
     ws.onmessage = (event: MessageEvent) => {
@@ -112,6 +115,7 @@ export class EngineSocket {
 
     ws.onclose = () => {
       if (this.intentionallyClosed) return
+      this.handlers.onClose?.()
       this.retryTimer = setTimeout(() => {
         this.retryDelay = Math.min(this.retryDelay * 2, MAX_RETRY_MS)
         this._open()
