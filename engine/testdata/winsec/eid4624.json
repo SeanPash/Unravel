@@ -1,0 +1,23 @@
+{
+  "_time": "2026-06-05T19:37:00.000+00:00",
+  "host": "FILESRV",
+  "source": "WinEventLog:Security",
+  "sourcetype": "WinEventLog",
+  "EventCode": "4624",
+  "EventID": "4624",
+  "RecordNumber": "1003241",
+  "Channel": "Security",
+  "TargetUserName": "jdoe",
+  "TargetDomainName": "NORTHPOLE",
+  "TargetUserSid": "S-1-5-21-1111111111-2222222222-3333333333-1108",
+  "TargetLogonId": "0x4b2901",
+  "LogonType": "3",
+  "LogonProcessName": "NtLmSsp ",
+  "AuthenticationPackageName": "NTLM",
+  "WorkstationName": "WS01",
+  "IpAddress": "10.0.0.5",
+  "IpPort": "49920",
+  "SubjectUserName": "-",
+  "SubjectDomainName": "-",
+  "SubjectLogonId": "0x0"
+}

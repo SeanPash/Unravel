@@ -1,0 +1,20 @@
+{
+  "_time": "2026-06-05T19:34:00.000+00:00",
+  "host": "DC01",
+  "source": "WinEventLog:Security",
+  "sourcetype": "WinEventLog",
+  "EventCode": "4768",
+  "EventID": "4768",
+  "RecordNumber": "5519842",
+  "Channel": "Security",
+  "TargetUserName": "jdoe",
+  "TargetDomainName": "NORTHPOLE.LOCAL",
+  "TargetSid": "S-1-5-21-1111111111-2222222222-3333333333-1108",
+  "ServiceName": "krbtgt",
+  "IpAddress": "::ffff:10.0.0.5",
+  "IpPort": "49870",
+  "Status": "0x0",
+  "TicketOptions": "0x40810010",
+  "TicketEncryptionType": "0x12",
+  "PreAuthType": "2"
+}

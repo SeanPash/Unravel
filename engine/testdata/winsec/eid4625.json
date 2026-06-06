@@ -1,0 +1,21 @@
+{
+  "_time": "2026-06-05T19:35:00.000+00:00",
+  "host": "FILESRV",
+  "source": "WinEventLog:Security",
+  "sourcetype": "WinEventLog",
+  "EventCode": "4625",
+  "EventID": "4625",
+  "RecordNumber": "1003198",
+  "Channel": "Security",
+  "TargetUserName": "administrator",
+  "TargetDomainName": "NORTHPOLE",
+  "LogonType": "3",
+  "Status": "0xC000006D",
+  "SubStatus": "0xC000006A",
+  "FailureReason": "%%2313",
+  "WorkstationName": "WS01",
+  "IpAddress": "10.0.0.5",
+  "IpPort": "49911",
+  "SubjectUserName": "-",
+  "SubjectDomainName": "-"
+}
