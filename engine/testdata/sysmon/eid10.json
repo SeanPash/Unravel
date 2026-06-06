@@ -1,0 +1,18 @@
+{
+  "_time": "2026-06-05T19:32:00.000+00:00",
+  "host": "WS01",
+  "source": "WinEventLog:Microsoft-Windows-Sysmon/Operational",
+  "EventCode": "10",
+  "EventID": "10",
+  "UtcTime": "2026-06-05 19:32:00.000",
+  "SourceProcessGUID": "{abcd1234-0001-0000-0000-000000000001}",
+  "SourceProcessId": "4880",
+  "SourceImage": "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+  "SourceUser": "NORTHPOLE\\jdoe",
+  "TargetProcessGUID": "{abcd1234-0688-0000-0000-000000000688}",
+  "TargetProcessId": "688",
+  "TargetImage": "C:\\Windows\\System32\\lsass.exe",
+  "TargetUser": "NT AUTHORITY\\SYSTEM",
+  "GrantedAccess": "0x1010",
+  "CallTrace": "C:\\Windows\\SYSTEM32\\ntdll.dll+9d234"
+}

@@ -1,0 +1,14 @@
+{
+  "_time": "2026-06-05T19:33:00.000+00:00",
+  "host": "WS01",
+  "source": "WinEventLog:Microsoft-Windows-Sysmon/Operational",
+  "EventCode": "11",
+  "EventID": "11",
+  "UtcTime": "2026-06-05 19:33:00.000",
+  "ProcessGuid": "{abcd1234-0001-0000-0000-000000000001}",
+  "ProcessId": "4880",
+  "Image": "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+  "User": "NORTHPOLE\\jdoe",
+  "TargetFilename": "C:\\Users\\jdoe\\AppData\\Local\\Temp\\creds.dmp",
+  "CreationUtcTime": "2026-06-05 19:33:00.000"
+}
