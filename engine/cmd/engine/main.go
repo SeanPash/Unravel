@@ -95,7 +95,11 @@ func run(cfg config, logger *slog.Logger) error {
 		return fmt.Errorf("pipeline: %w", err)
 	}
 
-	server := api.NewServer(bcast, nil)
+	staticFS, err := api.StaticFS()
+	if err != nil {
+		return fmt.Errorf("static fs: %w", err)
+	}
+	server := api.NewServer(bcast, staticFS)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

@@ -55,7 +55,7 @@ export function chainTimestamps(chain: ChainResultPayload | null): Set<number> {
 
 // --- Cytoscape stylesheet ---
 
-const CY_STYLE: cytoscape.Stylesheet[] = [
+const CY_STYLE: cytoscape.StylesheetStyle[] = [
   {
     selector: 'node',
     style: {
@@ -226,7 +226,9 @@ export function GraphView({ nodes, edges, chain, timeWindow }: GraphViewProps) {
     if (!cy) return
 
     if (!timeWindow) {
-      cy.edges().forEach((e) => e.style('display', 'element'))
+      cy.edges().forEach((e) => {
+        e.style('display', 'element')
+      })
       return
     }
 
