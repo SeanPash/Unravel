@@ -3,6 +3,7 @@ import { EngineSocket } from './ws'
 import type { GraphUpdatePayload, ScoreUpdatePayload, ChainResultPayload, NarrationPayload, WsNode, WsEdge } from './ws'
 import { GraphView } from './GraphView'
 import { NarrationPanel } from './NarrationPanel'
+import { TimeScrubber } from './TimeScrubber'
 import './App.css'
 
 const WS_URL = (import.meta.env.VITE_WS_URL as string | undefined) ?? `ws://${window.location.host}/ws`
@@ -14,6 +15,7 @@ interface AppState {
   narration: NarrationPayload | null
   status: 'connecting' | 'live' | 'reconnecting'
   awaitingNarration: boolean
+  timeWindow: [number, number] | null
 }
 
 type Action =
@@ -23,6 +25,7 @@ type Action =
   | { type: 'narration'; payload: NarrationPayload }
   | { type: 'connected' }
   | { type: 'disconnected' }
+  | { type: 'set_time_window'; payload: [number, number] | null }
 
 const initialState: AppState = {
   nodes: {},
@@ -31,6 +34,7 @@ const initialState: AppState = {
   narration: null,
   status: 'connecting',
   awaitingNarration: false,
+  timeWindow: null,
 }
 
 function reducer(state: AppState, action: Action): AppState {
@@ -61,6 +65,8 @@ function reducer(state: AppState, action: Action): AppState {
       return { ...state, status: 'live' }
     case 'disconnected':
       return { ...state, status: 'reconnecting' }
+    case 'set_time_window':
+      return { ...state, timeWindow: action.payload }
   }
 }
 
@@ -85,6 +91,10 @@ export default function App() {
   const nodes = Object.values(state.nodes)
   const edges = Object.values(state.edges)
 
+  const edgeTimestamps = edges.map(e => e.ts)
+  const minTs = edgeTimestamps.length > 0 ? Math.min(...edgeTimestamps) : 0
+  const maxTs = edgeTimestamps.length > 0 ? Math.max(...edgeTimestamps) : 0
+
   return (
     <div className="app">
       <header className="app-header">
@@ -93,7 +103,20 @@ export default function App() {
       </header>
       <main className="app-main">
         <section className="graph-pane">
-          <GraphView nodes={nodes} edges={edges} chain={state.chain} />
+          <GraphView
+            nodes={nodes}
+            edges={edges}
+            chain={state.chain}
+            timeWindow={state.timeWindow}
+          />
+          {edges.length > 0 && (
+            <TimeScrubber
+              minTs={minTs}
+              maxTs={maxTs}
+              window={state.timeWindow}
+              onChange={(w) => dispatch({ type: 'set_time_window', payload: w })}
+            />
+          )}
         </section>
         <aside className="narration-pane">
           <NarrationPanel narration={state.narration} awaitingNarration={state.awaitingNarration} />
