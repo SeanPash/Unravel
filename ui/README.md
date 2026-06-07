@@ -1,73 +1,75 @@
-# React + TypeScript + Vite
+# Unravel UI
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+React front-end for the Causal Reconstruction Engine. Renders the live provenance graph emitted by the Go engine, highlights extracted causal chains, and shows the AI narrator's prose, hypotheses, and containment actions.
 
-Currently, two official plugins are available:
+This package is the development harness for the UI. In production the Go engine binary serves the built assets directly from a single port; this Vite dev server is only used while iterating on the frontend.
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+## Prerequisites
 
-## React Compiler
+- Node.js 20 or newer (matches the `@types/node` major in `package.json`).
+- npm 10 or newer.
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+## Install
 
-## Expanding the ESLint configuration
-
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
-
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```
+npm install
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+## Commands
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+- `npm run dev` - Vite dev server with HMR. Defaults to `http://localhost:5173/`.
+- `npm test` - vitest single-run sweep (`ws.test.ts`, `GraphView.test.tsx`, `smoke.test.ts`).
+- `npm run test:watch` - vitest in watch mode.
+- `npm run mock` - standalone WebSocket mock server at `ws://localhost:8080/ws`. Replays `mock-server/fixtures/chain-phishing.json` for development without the Go engine.
+- `npm run build` - production build into `dist/`. The engine binary embeds this directory.
+- `npm run lint` - ESLint over the workspace.
 
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+## Environment
+
+- `VITE_WS_URL` - WebSocket URL the client connects to. Defaults to `ws://${window.location.host}/ws`, which is correct when the engine binary serves the UI itself. Set this when running `npm run dev` against the mock server or a remote engine:
+
+  ```
+  VITE_WS_URL=ws://localhost:8080/ws npm run dev
+  ```
+
+## Layout
+
 ```
+src/
+  App.tsx              two-pane layout, WebSocket lifecycle, top-level state
+  ws.ts                EngineSocket client with reconnect/backoff
+  GraphView.tsx        Cytoscape graph canvas, chain highlight, time-window filter
+  NarrationPanel.tsx   narration prose, hypotheses, action checklist
+  TimeScrubber.tsx     replay-mode time-window slider with Live snap-back
+mock-server/
+  server.ts            Node WebSocket server that replays the canned timeline
+  fixtures/            canned message sequences (phishing kill chain)
+```
+
+The WebSocket message contract is defined in `spec/sean-ui-lab.md` and produced by the engine in `engine/internal/api`. Do not change the envelope without coordinating both ends.
+
+## Development against the mock server
+
+In one terminal:
+
+```
+npm run mock
+```
+
+In another:
+
+```
+VITE_WS_URL=ws://localhost:8080/ws npm run dev
+```
+
+Open the dev server URL. The mock will stream the phishing timeline and the graph and narration panel should populate end-to-end.
+
+## Development against the engine
+
+Run the engine in replay mode from `engine/`:
+
+```
+go run ./cmd/engine --mode=replay --testdata=testdata
+```
+
+The engine listens on `:8080` by default. Either point the Vite dev server at it (`VITE_WS_URL=ws://localhost:8080/ws npm run dev`) or, once the engine embeds the built UI, open `http://localhost:8080/` directly.
