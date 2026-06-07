@@ -254,7 +254,7 @@ func (s *Scorer) componentMean(start *types.Edge, g *graph.Graph) (float64, stri
 	var sum float64
 	var count int
 	var hotEdge string
-	var hotScore float64
+	var hotTS int64
 	for eid := range seenEdges {
 		sc, ok := s.edgeScores[eid]
 		if !ok {
@@ -262,9 +262,19 @@ func (s *Scorer) componentMean(start *types.Edge, g *graph.Graph) (float64, stri
 		}
 		sum += sc
 		count++
-		if sc > hotScore {
-			hotScore = sc
+		// Hot node is the destination of the freshest edge in the component:
+		// the chain extractor walks backward from there, so picking the tip of
+		// the suspicious chain (rather than its root) gives the full kill
+		// chain. The mean-vs-threshold check above already gates "is this
+		// component suspicious?"; the hot-edge selection just picks the right
+		// starting point for the backward walk.
+		ts := int64(0)
+		if e := g.Edge(eid); e != nil {
+			ts = e.TS
+		}
+		if ts > hotTS || hotEdge == "" {
 			hotEdge = eid
+			hotTS = ts
 		}
 	}
 	if count == 0 {
