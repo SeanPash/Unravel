@@ -1,0 +1,92 @@
+[
+  {
+    "source": "sysmon",
+    "event": {
+      "_time": "2026-06-05T19:30:00.000+00:00",
+      "host": "WS01",
+      "sourcetype": "WinEventLog:Microsoft-Windows-Sysmon/Operational",
+      "EventCode": "1",
+      "EventID": "1",
+      "RecordNumber": "evt-001",
+      "UtcTime": "2026-06-05 19:30:00.000",
+      "ProcessId": "4120",
+      "Image": "C:\\Program Files\\Microsoft Office\\root\\Office16\\WINWORD.EXE",
+      "CommandLine": "WINWORD.EXE /n /q phish.docm",
+      "User": "NORTHPOLE\\jdoe",
+      "ParentProcessId": "4000",
+      "ParentImage": "C:\\Windows\\explorer.exe"
+    }
+  },
+  {
+    "source": "sysmon",
+    "event": {
+      "_time": "2026-06-05T19:30:05.000+00:00",
+      "host": "WS01",
+      "sourcetype": "WinEventLog:Microsoft-Windows-Sysmon/Operational",
+      "EventCode": "1",
+      "EventID": "1",
+      "RecordNumber": "evt-002",
+      "UtcTime": "2026-06-05 19:30:05.000",
+      "ProcessId": "4880",
+      "Image": "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+      "CommandLine": "powershell.exe -NoP -W Hidden -Enc YQBiAGMAZA==",
+      "User": "NORTHPOLE\\jdoe",
+      "ParentProcessId": "4120",
+      "ParentImage": "C:\\Program Files\\Microsoft Office\\root\\Office16\\WINWORD.EXE"
+    }
+  },
+  {
+    "source": "sysmon",
+    "event": {
+      "_time": "2026-06-05T19:30:10.000+00:00",
+      "host": "WS01",
+      "sourcetype": "WinEventLog:Microsoft-Windows-Sysmon/Operational",
+      "EventCode": "1",
+      "EventID": "1",
+      "RecordNumber": "evt-003",
+      "UtcTime": "2026-06-05 19:30:10.000",
+      "ProcessId": "5001",
+      "Image": "C:\\Tools\\mimikatz.exe",
+      "CommandLine": "mimikatz.exe sekurlsa::logonpasswords",
+      "User": "NORTHPOLE\\jdoe",
+      "ParentProcessId": "4880",
+      "ParentImage": "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe"
+    }
+  },
+  {
+    "source": "sysmon",
+    "event": {
+      "_time": "2026-06-05T19:30:15.000+00:00",
+      "host": "WS01",
+      "sourcetype": "WinEventLog:Microsoft-Windows-Sysmon/Operational",
+      "EventCode": "1",
+      "EventID": "1",
+      "RecordNumber": "evt-004",
+      "UtcTime": "2026-06-05 19:30:15.000",
+      "ProcessId": "5002",
+      "Image": "C:\\Windows\\System32\\wbem\\wmic.exe",
+      "CommandLine": "wmic /node:DC01 process call create cmd.exe",
+      "User": "NORTHPOLE\\Administrator",
+      "ParentProcessId": "5001",
+      "ParentImage": "C:\\Tools\\mimikatz.exe"
+    }
+  },
+  {
+    "source": "sysmon",
+    "event": {
+      "_time": "2026-06-05T19:30:20.000+00:00",
+      "host": "WS01",
+      "sourcetype": "WinEventLog:Microsoft-Windows-Sysmon/Operational",
+      "EventCode": "1",
+      "EventID": "1",
+      "RecordNumber": "evt-005",
+      "UtcTime": "2026-06-05 19:30:20.000",
+      "ProcessId": "5003",
+      "Image": "C:\\PSTools\\psexec.exe",
+      "CommandLine": "psexec \\\\DC01 -s cmd.exe",
+      "User": "NORTHPOLE\\Administrator",
+      "ParentProcessId": "5002",
+      "ParentImage": "C:\\Windows\\System32\\wbem\\wmic.exe"
+    }
+  }
+]
