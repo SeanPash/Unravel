@@ -3,7 +3,11 @@ package pipeline
 import (
 	"context"
 	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -110,4 +114,138 @@ func TestPipelineProducesChainResultAndNarration(t *testing.T) {
 
 	cancel()
 	<-done
+}
+
+func TestPipelineFiresHECOnChainResult(t *testing.T) {
+	t.Parallel()
+	base := time.Date(2026, 6, 5, 19, 30, 0, 0, time.UTC)
+	events := []splunk.RawEvent{
+		spawnEvent(base, "WS01", 4000, "C:\\Windows\\explorer.exe", 4120, "C:\\Office\\WINWORD.EXE"),
+		spawnEvent(base.Add(5*time.Second), "WS01", 4120, "C:\\Office\\WINWORD.EXE", 4880, "C:\\Windows\\powershell.exe"),
+		spawnEvent(base.Add(10*time.Second), "WS01", 4880, "C:\\Windows\\powershell.exe", 5001, "C:\\Tools\\mimikatz.exe"),
+	}
+	src := splunk.NewMockFromEntries(events)
+	src.Start()
+
+	var hits int32
+	bodies := make(chan map[string]any, 4)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&hits, 1)
+		raw, _ := io.ReadAll(r.Body)
+		var body map[string]any
+		_ = json.Unmarshal(raw, &body)
+		select {
+		case bodies <- body:
+		default:
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	hec := splunk.NewHECClient(splunk.HECConfig{
+		URL:        srv.URL,
+		Token:      "test-token",
+		Index:      "engine",
+		Sourcetype: "unravel:chain",
+	})
+	if hec == nil {
+		t.Fatal("hec client unexpectedly nil")
+	}
+
+	g := graph.New()
+	sc := scorer.New(scorer.Config{Threshold: 0.01})
+	bcast := api.NewBroadcaster()
+	defer bcast.Close()
+
+	p, err := New(Config{
+		Source:         src,
+		Graph:          g,
+		Scorer:         sc,
+		Narrator:       ai.NewStub(),
+		Broadcaster:    bcast,
+		HEC:            hec,
+		SignalDebounce: 100 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- p.Run(ctx) }()
+
+	select {
+	case body := <-bodies:
+		if body["index"] != "engine" {
+			t.Errorf("index = %v, want engine", body["index"])
+		}
+		if body["sourcetype"] != "unravel:chain" {
+			t.Errorf("sourcetype = %v, want unravel:chain", body["sourcetype"])
+		}
+		ev, ok := body["event"].(map[string]any)
+		if !ok {
+			t.Fatalf("event field is %T, want map", body["event"])
+		}
+		if _, ok := ev["steps"]; !ok {
+			t.Error("event missing steps")
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatalf("no HEC hit, count=%d", atomic.LoadInt32(&hits))
+	}
+
+	cancel()
+	<-done
+}
+
+func TestPipelineNilHECStillWorks(t *testing.T) {
+	t.Parallel()
+	base := time.Date(2026, 6, 5, 19, 30, 0, 0, time.UTC)
+	events := []splunk.RawEvent{
+		spawnEvent(base, "WS01", 4000, "C:\\Windows\\explorer.exe", 4120, "C:\\Office\\WINWORD.EXE"),
+		spawnEvent(base.Add(5*time.Second), "WS01", 4120, "C:\\Office\\WINWORD.EXE", 4880, "C:\\Windows\\powershell.exe"),
+	}
+	src := splunk.NewMockFromEntries(events)
+	src.Start()
+
+	g := graph.New()
+	sc := scorer.New(scorer.Config{Threshold: 0.01})
+	bcast := api.NewBroadcaster()
+	defer bcast.Close()
+	sub := bcast.Subscribe()
+
+	p, err := New(Config{
+		Source:         src,
+		Graph:          g,
+		Scorer:         sc,
+		Narrator:       ai.NewStub(),
+		Broadcaster:    bcast,
+		HEC:            nil,
+		SignalDebounce: 100 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- p.Run(ctx) }()
+
+	deadline := time.After(3 * time.Second)
+	for {
+		select {
+		case msg, ok := <-sub.Out():
+			if !ok {
+				t.Fatal("subscriber closed before chain_result")
+			}
+			if msg.Type == types.MsgTypeChainResult {
+				cancel()
+				<-done
+				return
+			}
+		case <-deadline:
+			t.Fatal("no chain_result received with nil HEC")
+		}
+	}
 }
