@@ -6,7 +6,8 @@ import { NarrationPanel } from './NarrationPanel'
 import { TimeScrubber } from './TimeScrubber'
 import './App.css'
 
-const WS_URL = (import.meta.env.VITE_WS_URL as string | undefined) ?? `ws://${window.location.host}/ws`
+const WS_URL = (import.meta.env.VITE_WS_URL as string | undefined)
+  ?? `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}/ws`
 
 interface AppState {
   nodes: Record<string, WsNode>
