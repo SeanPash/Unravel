@@ -24,16 +24,20 @@ import (
 )
 
 type config struct {
-	mode        string
-	port        int
-	replaySpeed float64
-	testdataDir string
-	splunkURL   string
-	splunkToken string
-	splunkQuery string
-	insecure    bool
-	threshold   float64
-	apiKey      string
+	mode          string
+	port          int
+	replaySpeed   float64
+	testdataDir   string
+	splunkURL     string
+	splunkToken   string
+	splunkQuery   string
+	insecure      bool
+	threshold     float64
+	apiKey        string
+	hecURL        string
+	hecToken      string
+	hecIndex      string
+	hecSourcetype string
 }
 
 func main() {
@@ -59,6 +63,10 @@ func parseFlags() config {
 	flag.BoolVar(&cfg.insecure, "insecure", true, "skip TLS verification for the Splunk endpoint")
 	flag.Float64Var(&cfg.threshold, "threshold", 0.5, "scorer trigger threshold")
 	flag.StringVar(&cfg.apiKey, "anthropic-key", os.Getenv("ANTHROPIC_API_KEY"), "Anthropic API key (omit to fall back to stub narrator)")
+	flag.StringVar(&cfg.hecURL, "hec-url", "", "Splunk HEC endpoint base URL (e.g. https://splunk:8088)")
+	flag.StringVar(&cfg.hecToken, "hec-token", os.Getenv("SPLUNK_HEC_TOKEN"), "Splunk HEC token (omit to disable HEC write-back)")
+	flag.StringVar(&cfg.hecIndex, "hec-index", "main", "Splunk HEC target index")
+	flag.StringVar(&cfg.hecSourcetype, "hec-sourcetype", "unravel:chain", "Splunk HEC sourcetype for engine-derived events")
 	flag.Parse()
 	return cfg
 }
@@ -83,12 +91,24 @@ func run(cfg config, logger *slog.Logger) error {
 	bcast := api.NewBroadcaster()
 	defer bcast.Close()
 
+	hec := splunk.NewHECClient(splunk.HECConfig{
+		URL:        cfg.hecURL,
+		Token:      cfg.hecToken,
+		Index:      cfg.hecIndex,
+		Sourcetype: cfg.hecSourcetype,
+		Insecure:   cfg.insecure,
+	})
+	if hec != nil {
+		logger.Info("splunk hec write-back enabled", "url", cfg.hecURL, "index", cfg.hecIndex, "sourcetype", cfg.hecSourcetype)
+	}
+
 	p, err := pipeline.New(pipeline.Config{
 		Source:      source,
 		Graph:       g,
 		Scorer:      sc,
 		Narrator:    narrator,
 		Broadcaster: bcast,
+		HEC:         hec,
 		Logger:      logger,
 	})
 	if err != nil {

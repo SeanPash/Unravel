@@ -24,7 +24,7 @@ import (
 )
 
 // Config holds the wired-up dependencies. All fields are required except
-// Logger, which defaults to slog.Default().
+// Logger, which defaults to slog.Default(), and HEC, which is optional.
 type Config struct {
 	Source      splunk.Source
 	Graph       *graph.Graph
@@ -33,8 +33,15 @@ type Config struct {
 	Broadcaster *api.Broadcaster
 	Logger      *slog.Logger
 
+	// HEC is the optional Splunk write-back sink. When nil, chain results are
+	// only broadcast over WebSocket and never echoed back to Splunk.
+	HEC *splunk.HECClient
+
 	// NarrationTimeout caps each LLM call. Defaults to 20s.
 	NarrationTimeout time.Duration
+
+	// HECTimeout caps each HEC write. Defaults to 5s.
+	HECTimeout time.Duration
 
 	// SignalDebounce coalesces a burst of scorer signals into a single chain
 	// extraction. After a signal arrives, the pipeline waits this long for
@@ -59,6 +66,9 @@ func New(cfg Config) (*Pipeline, error) {
 	}
 	if cfg.NarrationTimeout <= 0 {
 		cfg.NarrationTimeout = 20 * time.Second
+	}
+	if cfg.HECTimeout <= 0 {
+		cfg.HECTimeout = 5 * time.Second
 	}
 	if cfg.SignalDebounce <= 0 {
 		cfg.SignalDebounce = 250 * time.Millisecond
@@ -192,6 +202,7 @@ func (p *Pipeline) handleSignal(ctx context.Context, sig scorer.Signal) {
 	if err == nil {
 		p.cfg.Broadcaster.Send(chainMsg)
 	}
+	p.sendHEC(ctx, result)
 
 	nctx, cancel := context.WithTimeout(ctx, p.cfg.NarrationTimeout)
 	defer cancel()
@@ -204,6 +215,23 @@ func (p *Pipeline) handleSignal(ctx context.Context, sig scorer.Signal) {
 	if err == nil {
 		p.cfg.Broadcaster.Send(narrMsg)
 	}
+}
+
+// sendHEC fires the optional Splunk write-back in a goroutine so a slow or
+// unreachable HEC endpoint never stalls ingest or narration. Nil-safe.
+func (p *Pipeline) sendHEC(ctx context.Context, result types.ChainResultPayload) {
+	if p.cfg.HEC == nil {
+		return
+	}
+	p.wg.Add(1)
+	go func() {
+		defer p.wg.Done()
+		hctx, cancel := context.WithTimeout(ctx, p.cfg.HECTimeout)
+		defer cancel()
+		if err := p.cfg.HEC.Send(hctx, result); err != nil {
+			p.cfg.Logger.Warn("hec send", "err", err)
+		}
+	}()
 }
 
 // edgeUpdate ties a freshly appended edge to the destination node so we can
