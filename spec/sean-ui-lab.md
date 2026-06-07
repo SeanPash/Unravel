@@ -302,3 +302,59 @@ Run with: `vitest` from `ui/`
 - [ ] `lab/attack-runner/atomics.yaml`: kill chain step definitions
 - [ ] `lab/attack-runner/run.py`: sequential invocation with `--speed` and `--step` flags
 - [ ] Smoke test: `--speed instant` runs all 5 steps without error
+
+---
+
+# CURRENT TASKS (post-MVP) - START HERE
+
+> **For new Claude sessions:** the MVP checklist above is complete in code. The React UI is built and tested; the lab scaffolding (Vagrantfile, Ansible, Splunk forwarder config, attack runner) is written but has never been booted against real VMs. Pick up from this section. These tasks are scoped to Sean (UI docs, lab smoke, demo video) and must be done before the hackathon submission.
+
+Status snapshot (as of 2026-06-06): all UI components from the MVP exist with vitest coverage, the mock WebSocket server replays the canned timeline, and the lab files exist but have not been validated end-to-end. See `CLAUDE.md` sections `UI State` and `Lab State` for the per-file summary. The work below closes the gap between "files exist" and "demo-ready."
+
+## S1. Replace ui/README.md with project docs
+
+**Why:** `ui/README.md` is still the default Vite template and tells judges (and future Claudes) nothing about this project. `CLAUDE.md` already calls this out as misleading.
+
+**Where:** `ui/README.md`.
+
+- [ ] Replace the entire file. Sections: what the UI is (Causal Reconstruction Engine front-end), prerequisites (Node version), commands (`npm install`, `npm run dev`, `npm test`, `npm run mock`, `npm run build`), the `VITE_WS_URL` environment variable (and the default `ws://${window.location.host}/ws`), and a note that the engine binary (after Luigi's L1) will serve the production build directly so this dev server is for development only.
+- [ ] Keep it under 100 lines. No emojis, no em dashes.
+
+## S2. Boot the GOAD-lite lab end-to-end and capture the seed data
+
+**Why:** `lab/topology/Vagrantfile`, `lab/topology/ansible/`, and `lab/splunk/*.conf` have not been booted on real VMs. Until they have, the "live mode" demo path is unproven and we cannot record a credible demo video.
+
+**Where:** `lab/topology/`, `lab/splunk/`, plus any new docs needed under `lab/README.md`.
+
+- [ ] `vagrant up dc01 ws01 kali` from `lab/topology/`. Resolve provisioning failures by editing the Vagrantfile and Ansible playbooks until all three VMs come up clean from a destroyed state.
+- [ ] Install Sysmon on `ws01` and confirm events flow into Splunk. Verify the Universal Forwarder picks up the channels listed in `lab/splunk/inputs.conf` and that they land at the index configured in `outputs.conf`.
+- [ ] Run `python lab/attack-runner/run.py --speed instant`. Confirm Splunk receives all five kill chain steps. Save a small slice of the raw events (one per EID family) under `lab/fixtures/` for offline debugging.
+- [ ] Write `lab/README.md`: prerequisites (Vagrant, VirtualBox, Splunk Enterprise), one-shot bring-up command, attack-runner invocation, teardown command. Reference it from the repo-root `README.md` Luigi will create.
+
+## S3. End-to-end demo run with the engine binary
+
+**Why:** The replay path is the only path proven today. For the hackathon submission and the demo video, we need to show the live path (lab > Splunk > engine RESTSource > UI) at least once.
+
+**Where:** depends on Luigi's L1 (embedded UI in the engine binary) being done first. Coordinate the merge order.
+
+- [ ] After Luigi's L1 lands, build the engine binary (`go build ./cmd/engine` from `engine/`).
+- [ ] Boot the lab (`vagrant up` in `lab/topology/`), point the engine binary at the lab Splunk: `./engine --mode=live --splunk-url=... --splunk-token=... --anthropic-key=$ANTHROPIC_API_KEY`.
+- [ ] In a second terminal, run `python lab/attack-runner/run.py --speed fast`.
+- [ ] Open `http://localhost:8080/` in a browser. Confirm the graph populates, the chain highlights when the threshold trips, and the narration panel fills in.
+- [ ] If the chain fires but narration looks weak, re-prompt with Luigi before changing the engine.
+
+## S4. Demo video under 3 minutes
+
+**Why:** Explicit hackathon submission requirement (see `causal-reconstruction-engine.md`).
+
+- [ ] Storyboard a 2:30 take. Suggested beats: 15s problem framing (analysts drown in alerts), 30s architecture (point at `architecture.svg`), 90s live demo (kick off the attack runner, narrate the graph filling in, read the AI narration), 15s call to action. Adjust to fit but stay under 3:00.
+- [ ] Record from a clean lab boot. Use the engine binary built in S3, not the dev Vite server, so the URL bar shows a single port.
+- [ ] No emojis on overlays. No em dashes in subtitles.
+- [ ] Upload to the team's chosen host (YouTube unlisted or similar) and add the link to the repo-root `README.md` Luigi creates.
+
+## Definition of done for this task group
+
+- [ ] `ui/README.md` reads as project docs, not the Vite template.
+- [ ] `vagrant up` from a clean checkout brings the lab up without manual fixups, and `attack-runner/run.py` drives a full kill chain into Splunk.
+- [ ] A fresh teammate can clone the repo, follow `lab/README.md` + the repo-root `README.md`, and reproduce the live demo on their own machine.
+- [ ] A demo video link lives in the repo-root `README.md`.

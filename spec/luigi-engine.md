@@ -288,3 +288,51 @@ Run with: `go test ./...` from `engine/`
 ### Testdata
 
 - [ ] `testdata/chain-phishing.json`: 5-step kill chain event sequence (Sysmon + WinSec + AD)
+
+---
+
+# CURRENT TASKS (post-MVP) - START HERE
+
+> **For new Claude sessions:** the MVP checklist above is complete. The phase-1 walking skeleton shipped. Pick up from this section. These tasks are scoped to Luigi (engine binary, Splunk integration, repo-root deliverables) and must be done before the hackathon submission.
+
+Status snapshot (as of 2026-06-06): all seven engine subcomponents are implemented and tested, `go test ./...` is green, and the replay pipeline works end-to-end through the WebSocket. See `CLAUDE.md` section `Engine State` for the per-package summary. The work below closes the gap between "engine works in isolation" and "hackathon-ready submission."
+
+## L1. Embed the UI build into the engine binary
+
+**Why:** Right now `cmd/engine/main.go` passes `nil` for `api.NewServer`'s static FS, so the React app must be served separately (Vite). For the demo and submission we want one binary that serves the WebSocket and the UI on the same port.
+
+**Where:** `engine/cmd/engine/main.go`, plus a new `engine/internal/api/static.go` (or similar) holding the `go:embed` directive.
+
+- [ ] Add a build step (Makefile target, `go generate` directive, or short shell script in `engine/`) that runs `npm --prefix ../ui run build` and copies `ui/dist/` into `engine/internal/api/static/`. Commit a `.gitignore` entry for the copied tree so the build output is not checked in.
+- [ ] Create `engine/internal/api/static.go` with `//go:embed static/*` exposing an `fs.FS`. If the embed directory is empty during `go build` it must not fail; gate the embed behind a build tag or commit a `.gitkeep` so the empty case still compiles.
+- [ ] In `cmd/engine/main.go`, replace `api.NewServer(bcast, nil)` with the embedded FS. Strip the leading `static/` prefix via `fs.Sub` so `GET /` serves `index.html`.
+- [ ] Smoke test: from `engine/`, run the build step, then `go run ./cmd/engine --mode=replay`. Open `http://localhost:8080/` in a browser. The React UI must load and connect to `/ws` without setting `VITE_WS_URL`.
+- [ ] Update the `Build, Test, Run` section of `CLAUDE.md` with the build step.
+
+## L2. Splunk HEC write-back
+
+**Why:** The locked design decision in `CLAUDE.md` calls for HEC write-back of engine-derived events (chain results, scored edges) so a Splunk analyst can pivot from the engine's output back into raw logs. Without it, the "writes back to Splunk" judging story is unsupported. The replay demo does not require it, but the hackathon submission does.
+
+**Where:** new package `engine/internal/splunk/hec.go` (plus tests) and pipeline wiring.
+
+- [ ] Define `type HECClient` with `Send(ctx context.Context, event any) error`. Use `services/collector/event` with an `Authorization: Splunk <token>` header and `index=` plus `sourcetype=` configurable.
+- [ ] Add a `HECConfig` struct (URL, token, index, sourcetype, insecure) and a constructor.
+- [ ] Wire HEC into `pipeline.Pipeline` as an optional sink: on every `chain_result`, send a structured JSON event. Make it nil-safe so replay and ai-off modes still work without HEC configured.
+- [ ] Add CLI flags to `cmd/engine/main.go`: `--hec-url`, `--hec-token`, `--hec-index`, `--hec-sourcetype`. Default to disabled when token is empty.
+- [ ] Unit test against an `httptest.Server` that asserts the request shape and auth header.
+- [ ] Document the flags in `CLAUDE.md`'s `Build, Test, Run` section.
+
+## L3. Repo-root README, LICENSE, architecture diagram
+
+**Why:** Explicit hackathon submission requirements (see `causal-reconstruction-engine.md`).
+
+- [ ] `README.md` at repo root. Sections: one-paragraph project pitch, architecture overview (link to the diagram), replay quickstart (`go run ./cmd/engine --mode=replay` from `engine/` plus a pointer to the UI), live mode quickstart, repo layout pointers (engine, ui, lab, spec, docs), license note. Keep it tight; this is the file judges open first.
+- [ ] `LICENSE` at repo root. MIT or Apache-2.0. Confirm with the team before committing.
+- [ ] `architecture.svg` (or `.png`) at repo root. Must show: Splunk REST tail -> schema mapper -> graph builder -> temporal index -> scorer -> chain extractor -> AI narrator -> WebSocket -> UI. Label the AI narrator as the only LLM-touching component to reinforce the architectural north star. Reference it from the README and from the new docs in CLAUDE.md.
+
+## Definition of done for this task group
+
+- [ ] `go run ./cmd/engine --mode=replay` from a fresh clone (after `npm install && npm run build` in `ui/`, plus the embed build step) boots a single process at `:8080` that serves the UI and streams the replay timeline.
+- [ ] HEC write-back is verified against a local Splunk instance (or the lab one if L4 from Sean is done first); the engine pushes at least one `chain_result` event per replay run.
+- [ ] The repo root contains `README.md`, `LICENSE`, and `architecture.svg` (or `.png`).
+- [ ] `CLAUDE.md` is updated to reflect the new build step, HEC flags, and removed entries from the `Outstanding Work` list.
