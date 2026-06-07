@@ -1,0 +1,58 @@
+---
+# Installs and configures Splunk Universal Forwarder on Windows hosts.
+# Copies inputs.conf and outputs.conf from lab/splunk/.
+#
+# Variables (passed via Vagrantfile extra_vars):
+#   splunk_host - Splunk indexer IP/hostname
+#   splunk_port - Splunk receiving port (default 9997)
+
+- name: Install Splunk Universal Forwarder
+  hosts: windows
+  gather_facts: false
+
+  vars:
+    uf_version: "9.2.1"
+    uf_build: "d8ae995bf219"
+    uf_installer: "splunkforwarder-{{ uf_version }}-{{ uf_build }}-x64-release.msi"
+    uf_download_url: "https://download.splunk.com/products/universalforwarder/releases/{{ uf_version }}/windows/{{ uf_installer }}"
+    uf_install_dir: "C:\\Program Files\\SplunkUniversalForwarder"
+    uf_admin_pass: "Splunk$vc123!"
+
+  tasks:
+    - name: Download Splunk Universal Forwarder MSI
+      ansible.windows.win_get_url:
+        url: "{{ uf_download_url }}"
+        dest: "C:\\Temp\\{{ uf_installer }}"
+
+    - name: Install Splunk Universal Forwarder
+      ansible.windows.win_package:
+        path: "C:\\Temp\\{{ uf_installer }}"
+        product_id: "{A26E7E7D-5CBF-4FBF-A3A9-3C3F2DC49E3E}"
+        arguments: >-
+          AGREETOLICENSE=Yes
+          SPLUNKPASSWORD="{{ uf_admin_pass }}"
+          RECEIVING_INDEXER="{{ splunk_host }}:{{ splunk_port }}"
+          LAUNCHSPLUNK=1
+          SERVICESTARTTYPE=auto
+        state: present
+
+    - name: Copy inputs.conf
+      ansible.windows.win_copy:
+        src: "../../splunk/inputs.conf"
+        dest: "{{ uf_install_dir }}\\etc\\system\\local\\inputs.conf"
+
+    - name: Copy outputs.conf
+      ansible.windows.win_copy:
+        src: "../../splunk/outputs.conf"
+        dest: "{{ uf_install_dir }}\\etc\\system\\local\\outputs.conf"
+
+    - name: Restart Splunk Universal Forwarder service
+      ansible.windows.win_service:
+        name: SplunkForwarder
+        state: restarted
+
+    - name: Ensure Splunk Universal Forwarder starts on boot
+      ansible.windows.win_service:
+        name: SplunkForwarder
+        start_mode: auto
+        state: started

@@ -1,0 +1,91 @@
+---
+# Promotes dc01 to an Active Directory Domain Controller.
+# Run once after the base Windows Server 2019 box is up.
+#
+# Variables (passed via Vagrantfile extra_vars):
+#   domain       - NetBIOS domain name (e.g. NORTHPOLE)
+#   domain_fqdn  - FQDN (e.g. northpole.local)
+#   dc01_ip      - Static IP of dc01
+
+- name: Promote dc01 to Active Directory Domain Controller
+  hosts: domain_controllers
+  gather_facts: false
+
+  vars:
+    safe_mode_password: "Vagrant123!"
+    domain_admin_user: "Administrator"
+    domain_admin_pass: "Vagrant123!"
+
+  tasks:
+    - name: Install AD DS and management tools
+      ansible.windows.win_feature:
+        name:
+          - AD-Domain-Services
+          - RSAT-AD-Tools
+          - RSAT-DNS-Server
+        state: present
+        include_management_tools: true
+      register: ad_feature
+
+    - name: Install DNS Server role
+      ansible.windows.win_feature:
+        name: DNS
+        state: present
+
+    - name: Promote to domain controller
+      microsoft.ad.domain:
+        dns_domain_name: "{{ domain_fqdn }}"
+        domain_netbios_name: "{{ domain }}"
+        safe_mode_password: "{{ safe_mode_password }}"
+        reboot: true
+      register: domain_install
+
+    - name: Wait for DC to come back after reboot
+      ansible.builtin.wait_for_connection:
+        delay: 30
+        timeout: 300
+
+    - name: Create demo users
+      microsoft.ad.user:
+        name: "{{ item.name }}"
+        firstname: "{{ item.firstname }}"
+        surname: "{{ item.surname }}"
+        password: "{{ item.password }}"
+        state: present
+        groups:
+          add: "{{ item.groups }}"
+      loop:
+        - name: jsmith
+          firstname: John
+          surname: Smith
+          password: "Password123!"
+          groups: ["Domain Users"]
+        - name: svc_splunk
+          firstname: Splunk
+          surname: Service
+          password: "Splunk$vc123!"
+          groups: ["Domain Users"]
+
+    - name: Enable AD audit policy - Logon/Logoff
+      ansible.windows.win_shell: >
+        auditpol /set /subcategory:"Logon" /success:enable /failure:enable;
+        auditpol /set /subcategory:"Logoff" /success:enable;
+        auditpol /set /subcategory:"Kerberos Service Ticket Operations" /success:enable /failure:enable;
+        auditpol /set /subcategory:"Kerberos Authentication Service" /success:enable /failure:enable;
+        auditpol /set /subcategory:"Special Logon" /success:enable;
+        auditpol /set /subcategory:"Directory Service Access" /success:enable /failure:enable
+
+    - name: Install Sysmon
+      ansible.windows.win_package:
+        path: "https://download.sysinternals.com/files/Sysmon.zip"
+        product_id: Sysmon
+        state: present
+      ignore_errors: true
+
+    - name: Configure Sysmon with SwiftOnSecurity config
+      ansible.windows.win_shell: |
+        $configUrl = "https://raw.githubusercontent.com/SwiftOnSecurity/sysmon-config/master/sysmonconfig-export.xml"
+        $configPath = "C:\sysmon-config.xml"
+        Invoke-WebRequest -Uri $configUrl -OutFile $configPath
+        & "C:\Windows\Sysmon64.exe" -accepteula -i $configPath
+      ignore_errors: true
