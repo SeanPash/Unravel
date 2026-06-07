@@ -104,13 +104,21 @@ type KerberosService struct {
 }
 
 type ADEvent struct {
-	EventID    string
-	TS         time.Time
-	Host       string
-	ObjectType string
-	Operation  string
-	Target     string
-	Actor      string
+	EventID        string
+	TS             time.Time
+	Host           string
+	ObjectType     string
+	Operation      string
+	Target         string
+	TargetDomain   string
+	TargetSID      string
+	Member         string
+	MemberSID      string
+	Actor          string
+	ActorDomain    string
+	ActorSID       string
+	Attribute      string
+	AttributeValue string
 }
 
 type ProcessAccess struct {

@@ -1,0 +1,19 @@
+{
+  "_time": "2026-06-05T19:44:15.000+00:00",
+  "host": "DC01",
+  "source": "WinEventLog:Security",
+  "sourcetype": "WinEventLog",
+  "EventCode": "5136",
+  "EventID": "5136",
+  "RecordNumber": "1003330",
+  "Channel": "Security",
+  "ObjectDN": "CN=jdoe,CN=Users,DC=northpole,DC=local",
+  "ObjectClass": "user",
+  "AttributeLDAPDisplayName": "servicePrincipalName",
+  "AttributeValue": "HOST/filesrv.northpole.local",
+  "OperationType": "%%14674",
+  "SubjectUserName": "admin",
+  "SubjectDomainName": "NORTHPOLE",
+  "SubjectUserSid": "S-1-5-21-1111111111-2222222222-3333333333-500",
+  "SubjectLogonId": "0x55ab12"
+}

@@ -1,0 +1,17 @@
+{
+  "_time": "2026-06-05T19:42:00.000+00:00",
+  "host": "DC01",
+  "source": "WinEventLog:Security",
+  "sourcetype": "WinEventLog",
+  "EventCode": "4720",
+  "EventID": "4720",
+  "RecordNumber": "1003315",
+  "Channel": "Security",
+  "TargetUserName": "backdoor",
+  "TargetDomainName": "NORTHPOLE",
+  "TargetSid": "S-1-5-21-1111111111-2222222222-3333333333-1199",
+  "SubjectUserName": "admin",
+  "SubjectDomainName": "NORTHPOLE",
+  "SubjectUserSid": "S-1-5-21-1111111111-2222222222-3333333333-500",
+  "SubjectLogonId": "0x55ab12"
+}

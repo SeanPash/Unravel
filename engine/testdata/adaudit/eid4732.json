@@ -1,0 +1,19 @@
+{
+  "_time": "2026-06-05T19:43:30.000+00:00",
+  "host": "FILESRV",
+  "source": "WinEventLog:Security",
+  "sourcetype": "WinEventLog",
+  "EventCode": "4732",
+  "EventID": "4732",
+  "RecordNumber": "1003322",
+  "Channel": "Security",
+  "MemberName": "CN=backdoor,CN=Users,DC=northpole,DC=local",
+  "MemberSid": "S-1-5-21-1111111111-2222222222-3333333333-1199",
+  "TargetUserName": "Administrators",
+  "TargetDomainName": "Builtin",
+  "TargetSid": "S-1-5-32-544",
+  "SubjectUserName": "admin",
+  "SubjectDomainName": "NORTHPOLE",
+  "SubjectUserSid": "S-1-5-21-1111111111-2222222222-3333333333-500",
+  "SubjectLogonId": "0x55ab12"
+}

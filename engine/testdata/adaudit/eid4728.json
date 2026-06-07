@@ -1,0 +1,19 @@
+{
+  "_time": "2026-06-05T19:43:00.000+00:00",
+  "host": "DC01",
+  "source": "WinEventLog:Security",
+  "sourcetype": "WinEventLog",
+  "EventCode": "4728",
+  "EventID": "4728",
+  "RecordNumber": "1003318",
+  "Channel": "Security",
+  "MemberName": "CN=backdoor,CN=Users,DC=northpole,DC=local",
+  "MemberSid": "S-1-5-21-1111111111-2222222222-3333333333-1199",
+  "TargetUserName": "Domain Admins",
+  "TargetDomainName": "NORTHPOLE",
+  "TargetSid": "S-1-5-21-1111111111-2222222222-3333333333-512",
+  "SubjectUserName": "admin",
+  "SubjectDomainName": "NORTHPOLE",
+  "SubjectUserSid": "S-1-5-21-1111111111-2222222222-3333333333-500",
+  "SubjectLogonId": "0x55ab12"
+}
