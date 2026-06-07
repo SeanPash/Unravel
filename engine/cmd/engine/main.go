@@ -194,10 +194,10 @@ func buildNarrator(cfg config, logger *slog.Logger) ai.Narrator {
 	return ai.NewClaude(ai.ClaudeConfig{APIKey: cfg.apiKey})
 }
 
-// discoverTimelines returns every *.json file in dir, preferring a single
-// `chain-*.json` file at the root (the canonical replay timeline format) and
-// falling back to a wildcard glob so tests dropping a single file in a fresh
-// directory still work.
+// discoverTimelines returns every engine replay timeline at the root of dir.
+// Engine timelines are identified by a `-events.json` suffix to distinguish
+// them from other JSON files (e.g. UI WebSocket fixtures) that may share the
+// `chain-` prefix but use an unrelated schema.
 func discoverTimelines(dir string) ([]string, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -208,10 +208,7 @@ func discoverTimelines(dir string) ([]string, error) {
 		if e.IsDir() {
 			continue
 		}
-		if !strings.HasSuffix(e.Name(), ".json") {
-			continue
-		}
-		if !strings.HasPrefix(e.Name(), "chain-") {
+		if !strings.HasSuffix(e.Name(), "-events.json") {
 			continue
 		}
 		out = append(out, filepath.Join(dir, e.Name()))

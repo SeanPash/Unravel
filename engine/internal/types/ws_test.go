@@ -9,12 +9,11 @@ import (
 
 func fixturePath(t *testing.T) string {
 	t.Helper()
-	// engine/internal/types -> engine/testdata
 	wd, err := os.Getwd()
 	if err != nil {
 		t.Fatalf("getwd: %v", err)
 	}
-	return filepath.Join(wd, "..", "..", "testdata", "chain-phishing.json")
+	return filepath.Join(wd, "testdata", "chain-phishing.json")
 }
 
 func loadFixture(t *testing.T) []WSMessage {
