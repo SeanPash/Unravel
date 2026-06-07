@@ -1,0 +1,197 @@
+// Command engine is the streaming Causal Reconstruction Engine binary. It
+// boots the configured source (live Splunk export or replay from testdata),
+// wires the in-memory graph, scorer, chain extractor, and AI narrator into the
+// pipeline, and exposes the resulting events to UI clients over WebSocket.
+package main
+
+import (
+	"context"
+	"flag"
+	"fmt"
+	"log/slog"
+	"os"
+	"os/signal"
+	"path/filepath"
+	"strings"
+	"syscall"
+
+	"github.com/luigifernandez/unravel/engine/internal/ai"
+	"github.com/luigifernandez/unravel/engine/internal/api"
+	"github.com/luigifernandez/unravel/engine/internal/graph"
+	"github.com/luigifernandez/unravel/engine/internal/pipeline"
+	"github.com/luigifernandez/unravel/engine/internal/scorer"
+	"github.com/luigifernandez/unravel/engine/internal/splunk"
+)
+
+type config struct {
+	mode        string
+	port        int
+	replaySpeed float64
+	testdataDir string
+	splunkURL   string
+	splunkToken string
+	splunkQuery string
+	insecure    bool
+	threshold   float64
+	apiKey      string
+}
+
+func main() {
+	cfg := parseFlags()
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	slog.SetDefault(logger)
+
+	if err := run(cfg, logger); err != nil {
+		logger.Error("engine exited with error", "err", err)
+		os.Exit(1)
+	}
+}
+
+func parseFlags() config {
+	var cfg config
+	flag.StringVar(&cfg.mode, "mode", "replay", "engine mode: live | replay | ai-off")
+	flag.IntVar(&cfg.port, "port", 8080, "HTTP/WebSocket listen port")
+	flag.Float64Var(&cfg.replaySpeed, "replay-speed", 1.0, "timeline playback multiplier (replay mode)")
+	flag.StringVar(&cfg.testdataDir, "testdata", "testdata", "directory holding replay timelines")
+	flag.StringVar(&cfg.splunkURL, "splunk-url", "https://localhost:8089", "Splunk REST base URL (live mode)")
+	flag.StringVar(&cfg.splunkToken, "splunk-token", "", "Splunk bearer token (live mode)")
+	flag.StringVar(&cfg.splunkQuery, "splunk-search", "search index=sysmon", "Splunk search expression (live mode)")
+	flag.BoolVar(&cfg.insecure, "insecure", true, "skip TLS verification for the Splunk endpoint")
+	flag.Float64Var(&cfg.threshold, "threshold", 0.5, "scorer trigger threshold")
+	flag.StringVar(&cfg.apiKey, "anthropic-key", os.Getenv("ANTHROPIC_API_KEY"), "Anthropic API key (omit to fall back to stub narrator)")
+	flag.Parse()
+	return cfg
+}
+
+func run(cfg config, logger *slog.Logger) error {
+	source, err := buildSource(cfg)
+	if err != nil {
+		return fmt.Errorf("source: %w", err)
+	}
+	defer source.Close()
+
+	narrator := buildNarrator(cfg, logger)
+
+	g := graph.New()
+	sc := scorer.New(scorer.Config{
+		Threshold: cfg.threshold,
+		SensitiveLabels: []string{
+			"lsass.exe", "ntdsutil.exe", "secretsdump.py",
+		},
+	})
+
+	bcast := api.NewBroadcaster()
+	defer bcast.Close()
+
+	p, err := pipeline.New(pipeline.Config{
+		Source:      source,
+		Graph:       g,
+		Scorer:      sc,
+		Narrator:    narrator,
+		Broadcaster: bcast,
+		Logger:      logger,
+	})
+	if err != nil {
+		return fmt.Errorf("pipeline: %w", err)
+	}
+
+	server := api.NewServer(bcast, nil)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	signals := make(chan os.Signal, 1)
+	signal.Notify(signals, syscall.SIGINT, syscall.SIGTERM)
+	go func() {
+		<-signals
+		logger.Info("shutdown requested")
+		cancel()
+	}()
+
+	startSource(source, ctx)
+
+	addr := fmt.Sprintf(":%d", cfg.port)
+	logger.Info("engine listening", "addr", addr, "mode", cfg.mode)
+
+	errCh := make(chan error, 2)
+	go func() { errCh <- server.ListenAndServe(ctx, addr) }()
+	go func() { errCh <- p.Run(ctx) }()
+
+	if err := <-errCh; err != nil {
+		cancel()
+		return err
+	}
+	cancel()
+	return nil
+}
+
+func buildSource(cfg config) (splunk.Source, error) {
+	switch cfg.mode {
+	case "replay", "ai-off":
+		timelines, err := discoverTimelines(cfg.testdataDir)
+		if err != nil {
+			return nil, err
+		}
+		if len(timelines) == 0 {
+			return nil, fmt.Errorf("no timeline files matched %s/*.json", cfg.testdataDir)
+		}
+		return splunk.NewMockFromFiles(timelines, splunk.WithReplaySpeed(cfg.replaySpeed))
+	case "live":
+		if cfg.splunkToken == "" {
+			return nil, fmt.Errorf("--splunk-token is required in live mode")
+		}
+		return splunk.NewRESTSource(splunk.RESTConfig{
+			BaseURL:  cfg.splunkURL,
+			Token:    cfg.splunkToken,
+			Search:   cfg.splunkQuery,
+			Insecure: cfg.insecure,
+		}), nil
+	default:
+		return nil, fmt.Errorf("unknown --mode=%q (live | replay | ai-off)", cfg.mode)
+	}
+}
+
+func startSource(s splunk.Source, ctx context.Context) {
+	switch ms := s.(type) {
+	case *splunk.MockSource:
+		ms.Start()
+	case *splunk.RESTSource:
+		ms.Start(ctx)
+	}
+}
+
+func buildNarrator(cfg config, logger *slog.Logger) ai.Narrator {
+	if cfg.mode == "ai-off" || cfg.apiKey == "" {
+		if cfg.mode != "ai-off" {
+			logger.Info("anthropic key not set, falling back to stub narrator")
+		}
+		return ai.NewStub()
+	}
+	return ai.NewClaude(ai.ClaudeConfig{APIKey: cfg.apiKey})
+}
+
+// discoverTimelines returns every *.json file in dir, preferring a single
+// `chain-*.json` file at the root (the canonical replay timeline format) and
+// falling back to a wildcard glob so tests dropping a single file in a fresh
+// directory still work.
+func discoverTimelines(dir string) ([]string, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, err
+	}
+	var out []string
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		if !strings.HasSuffix(e.Name(), ".json") {
+			continue
+		}
+		if !strings.HasPrefix(e.Name(), "chain-") {
+			continue
+		}
+		out = append(out, filepath.Join(dir, e.Name()))
+	}
+	return out, nil
+}
+
