@@ -1,0 +1,117 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1180 380" font-family="Helvetica, Arial, sans-serif">
+  <title>Unravel architecture</title>
+  <desc>Left-to-right pipeline: Splunk REST tail, schema mapper, graph builder (with temporal index as a sibling), online scorer, chain extractor, AI narrator, WebSocket, UI. The AI narrator is marked as the only LLM-touching component.</desc>
+
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#37474f"/>
+    </marker>
+    <style>
+      .box { fill: #eceff1; stroke: #37474f; stroke-width: 1.5; }
+      .ext { fill: #cfd8dc; stroke: #37474f; stroke-width: 1.5; }
+      .ai  { fill: #ffe082; stroke: #b8860b; stroke-width: 2; }
+      .sub { fill: #f5f5f5; stroke: #90a4ae; stroke-width: 1.2; stroke-dasharray: 4 3; }
+      .ui  { fill: #c5e1a5; stroke: #33691e; stroke-width: 1.5; }
+      .ws  { fill: #b3e5fc; stroke: #01579b; stroke-width: 1.5; }
+      .label { font-size: 13px; fill: #102027; text-anchor: middle; }
+      .sublabel { font-size: 11px; fill: #455a64; text-anchor: middle; }
+      .aitag { font-size: 11px; fill: #6d4c00; text-anchor: middle; font-style: italic; }
+      .edge { stroke: #37474f; stroke-width: 1.6; fill: none; }
+      .title { font-size: 18px; fill: #102027; text-anchor: middle; font-weight: bold; }
+    </style>
+  </defs>
+
+  <text x="590" y="28" class="title">Unravel: Causal Reconstruction Engine</text>
+
+  <!-- Row Y centerline = 150 -->
+
+  <!-- Splunk REST tail (external/ingest) -->
+  <rect class="ext" x="20"  y="110" width="130" height="80" rx="6"/>
+  <text x="85"  y="142" class="label">Splunk REST tail</text>
+  <text x="85"  y="160" class="sublabel">long-poll search</text>
+  <text x="85"  y="176" class="sublabel">(or MockSource)</text>
+
+  <!-- Schema mapper -->
+  <rect class="box" x="170" y="110" width="130" height="80" rx="6"/>
+  <text x="235" y="142" class="label">Schema mapper</text>
+  <text x="235" y="160" class="sublabel">Sysmon, WinSec,</text>
+  <text x="235" y="176" class="sublabel">AD audit -&gt; typed</text>
+
+  <!-- Graph builder -->
+  <rect class="box" x="320" y="110" width="140" height="80" rx="6"/>
+  <text x="390" y="142" class="label">Graph builder</text>
+  <text x="390" y="160" class="sublabel">in-memory</text>
+  <text x="390" y="176" class="sublabel">adjacency</text>
+
+  <!-- Temporal index (sibling beneath graph builder) -->
+  <rect class="sub" x="320" y="230" width="140" height="60" rx="6"/>
+  <text x="390" y="256" class="label">Temporal index</text>
+  <text x="390" y="274" class="sublabel">time-bucketed lookups</text>
+
+  <!-- vertical link between graph builder and temporal index -->
+  <line class="edge" x1="390" y1="190" x2="390" y2="230" marker-end="url(#arrow)"/>
+  <line class="edge" x1="380" y1="230" x2="380" y2="190" marker-end="url(#arrow)"/>
+
+  <!-- Online scorer -->
+  <rect class="box" x="480" y="110" width="140" height="80" rx="6"/>
+  <text x="550" y="138" class="label">Online scorer</text>
+  <text x="550" y="156" class="sublabel">freq-rarity x decay</text>
+  <text x="550" y="172" class="sublabel">x structural lift</text>
+
+  <!-- scorer reads from temporal index -->
+  <path class="edge" d="M 460 260 C 500 260, 510 230, 530 210" marker-end="url(#arrow)"/>
+
+  <!-- Chain extractor -->
+  <rect class="box" x="640" y="110" width="140" height="80" rx="6"/>
+  <text x="710" y="142" class="label">Chain extractor</text>
+  <text x="710" y="160" class="sublabel">weighted backward</text>
+  <text x="710" y="176" class="sublabel">walk</text>
+
+  <!-- AI narrator -->
+  <rect class="ai"  x="800" y="110" width="160" height="80" rx="8"/>
+  <text x="880" y="138" class="label">AI narrator</text>
+  <text x="880" y="156" class="sublabel">Claude Sonnet 4.6</text>
+  <text x="880" y="172" class="aitag">only LLM-touching</text>
+  <text x="880" y="186" class="aitag">component</text>
+
+  <!-- WebSocket -->
+  <rect class="ws"  x="980" y="110" width="80" height="80" rx="6"/>
+  <text x="1020" y="146" class="label">WebSocket</text>
+  <text x="1020" y="164" class="sublabel">fan-out</text>
+
+  <!-- UI -->
+  <rect class="ui"  x="1080" y="110" width="80" height="80" rx="6"/>
+  <text x="1120" y="146" class="label">UI</text>
+  <text x="1120" y="164" class="sublabel">React +</text>
+  <text x="1120" y="180" class="sublabel">Cytoscape</text>
+
+  <!-- horizontal arrows along the main row -->
+  <line class="edge" x1="150" y1="150" x2="170" y2="150" marker-end="url(#arrow)"/>
+  <line class="edge" x1="300" y1="150" x2="320" y2="150" marker-end="url(#arrow)"/>
+  <line class="edge" x1="460" y1="150" x2="480" y2="150" marker-end="url(#arrow)"/>
+  <line class="edge" x1="620" y1="150" x2="640" y2="150" marker-end="url(#arrow)"/>
+  <line class="edge" x1="780" y1="150" x2="800" y2="150" marker-end="url(#arrow)"/>
+  <line class="edge" x1="960" y1="150" x2="980" y2="150" marker-end="url(#arrow)"/>
+  <line class="edge" x1="1060" y1="150" x2="1080" y2="150" marker-end="url(#arrow)"/>
+
+  <!-- chain extractor also pushes to websocket directly (engine output goes in, narration comes out) -->
+  <path class="edge" d="M 710 110 C 710 70, 1020 70, 1020 110" marker-end="url(#arrow)"/>
+  <text x="865" y="62" class="sublabel">graph + chain events</text>
+
+  <!-- Footer legend -->
+  <rect class="ai" x="40"  y="330" width="18" height="14"/>
+  <text x="66"  y="342" class="sublabel" text-anchor="start">LLM-touching (AI narrator only)</text>
+
+  <rect class="box" x="290" y="330" width="18" height="14"/>
+  <text x="316" y="342" class="sublabel" text-anchor="start">Engine subcomponent (zero LLM calls)</text>
+
+  <rect class="ext" x="600" y="330" width="18" height="14"/>
+  <text x="626" y="342" class="sublabel" text-anchor="start">External source</text>
+
+  <rect class="ws"  x="760" y="330" width="18" height="14"/>
+  <text x="786" y="342" class="sublabel" text-anchor="start">Transport</text>
+
+  <rect class="ui"  x="870" y="330" width="18" height="14"/>
+  <text x="896" y="342" class="sublabel" text-anchor="start">Client</text>
+</svg>
