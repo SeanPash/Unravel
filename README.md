@@ -20,15 +20,9 @@ go test ./...
 go run ./cmd/engine --mode=replay --testdata=testdata
 ```
 
-In another terminal (separate UI process; this goes away once the UI is embedded into the engine binary):
+The engine binary embeds the UI build (see [engine/README.md](engine/README.md) for the build step), so the same process serves the React app at `http://localhost:8080/` and the WebSocket at `ws://localhost:8080/ws`. Open `http://localhost:8080/` and watch the graph build and the narration appear once the scorer crosses threshold.
 
-```
-cd ui
-npm install
-npm run dev
-```
-
-Open the URL Vite prints. The engine serves the WebSocket on `:8080`; the UI reads `VITE_WS_URL` to find it (defaults to `ws://localhost:8080/ws`). Watch the graph build and the narration appear once the scorer crosses threshold.
+To iterate on the UI with Vite HMR instead, run the dev server separately and point it at the engine WebSocket. See [ui/README.md](ui/README.md) for that workflow.
 
 ## Quickstart: live mode
 
@@ -57,8 +51,8 @@ go run ./cmd/engine --mode=ai-off --testdata=testdata
 
 ## Repo layout
 
-- `engine/` - Go engine. Ingest, schema mappers, graph, temporal index, scorer, chain extractor, AI narrator, WebSocket server. `cmd/engine` is the binary entry point.
-- `ui/` - React + Cytoscape front end plus a standalone WebSocket mock server under `ui/mock-server/` for UI work without the engine running.
+- [`engine/`](engine/README.md) - Go engine. Ingest, schema mappers, graph, temporal index, scorer, chain extractor, AI narrator, WebSocket server. `cmd/engine` is the binary entry point.
+- [`ui/`](ui/README.md) - React + Cytoscape front end plus a standalone WebSocket mock server under `ui/mock-server/` for UI work without the engine running.
 - `lab/` - GOAD-lite Vagrant topology, Ansible playbooks, Splunk Universal Forwarder config, and the Atomic Red Team attack runner.
 - `spec/` - per-owner specs for engine and UI work.
 - `causal-reconstruction-engine.md` - product framing and architecture for the selected Security track.
