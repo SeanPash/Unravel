@@ -2,3 +2,9 @@ CLAUDE.md
 TODO.md
 AGENTS.md
 docs/superpowers/
+.env
+*.pem
+*.key
+*.crt
+*.p12
+*_token*

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io/fs"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -33,9 +34,18 @@ func NewServer(bcast *Broadcaster, static fs.FS) *Server {
 		Upgrader: websocket.Upgrader{
 			ReadBufferSize:  1024,
 			WriteBufferSize: 4096,
-			// Local-LAN demo: don't enforce origin. Replace with an allowlist
-			// before this ever ships beyond a hackathon.
-			CheckOrigin: func(r *http.Request) bool { return true },
+			CheckOrigin: func(r *http.Request) bool {
+				origin := r.Header.Get("Origin")
+				if origin == "" {
+					return true
+				}
+				u, err := url.Parse(origin)
+				if err != nil {
+					return false
+				}
+				h := u.Hostname()
+				return h == "localhost" || h == "127.0.0.1"
+			},
 		},
 		WriteTimeout: 5 * time.Second,
 		PingInterval: 30 * time.Second,

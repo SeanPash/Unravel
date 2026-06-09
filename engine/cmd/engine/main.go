@@ -24,20 +24,21 @@ import (
 )
 
 type config struct {
-	mode           string
-	port           int
-	replaySpeed    float64
-	testdataDir    string
-	splunkURL      string
-	splunkToken    string
-	splunkQuery    string
-	insecure       bool
-	threshold      float64
-	apiKey         string
-	hecURL         string
-	hecToken       string
-	hecIndex       string
-	hecSourcetype  string
+	mode          string
+	bind          string
+	port          int
+	replaySpeed   float64
+	testdataDir   string
+	splunkURL     string
+	splunkToken   string
+	splunkQuery   string
+	insecure      bool
+	threshold     float64
+	apiKey        string
+	hecURL        string
+	hecToken      string
+	hecIndex      string
+	hecSourcetype string
 }
 
 func main() {
@@ -54,13 +55,14 @@ func main() {
 func parseFlags() config {
 	var cfg config
 	flag.StringVar(&cfg.mode, "mode", "replay", "engine mode: live | replay | ai-off")
+	flag.StringVar(&cfg.bind, "bind", "127.0.0.1", "HTTP/WebSocket listen address")
 	flag.IntVar(&cfg.port, "port", 8080, "HTTP/WebSocket listen port")
 	flag.Float64Var(&cfg.replaySpeed, "replay-speed", 1.0, "timeline playback multiplier (replay mode)")
 	flag.StringVar(&cfg.testdataDir, "testdata", "testdata", "directory holding replay timelines")
 	flag.StringVar(&cfg.splunkURL, "splunk-url", "https://localhost:8089", "Splunk REST base URL (live mode)")
 	flag.StringVar(&cfg.splunkToken, "splunk-token", "", "Splunk bearer token (live mode)")
 	flag.StringVar(&cfg.splunkQuery, "splunk-search", "search index=sysmon", "Splunk search expression (live mode)")
-	flag.BoolVar(&cfg.insecure, "insecure", true, "skip TLS verification for the Splunk endpoint")
+	flag.BoolVar(&cfg.insecure, "insecure", false, "skip TLS verification for the Splunk endpoint")
 	flag.Float64Var(&cfg.threshold, "threshold", 0.5, "scorer trigger threshold")
 	flag.StringVar(&cfg.apiKey, "anthropic-key", os.Getenv("ANTHROPIC_API_KEY"), "Anthropic API key (omit to fall back to stub narrator)")
 	flag.StringVar(&cfg.hecURL, "hec-url", "", "Splunk HEC base URL for chain result write-back, e.g. https://splunk:8088 (disabled when empty)")
@@ -124,7 +126,7 @@ func run(cfg config, logger *slog.Logger) error {
 
 	startSource(source, ctx)
 
-	addr := fmt.Sprintf(":%d", cfg.port)
+	addr := fmt.Sprintf("%s:%d", cfg.bind, cfg.port)
 	logger.Info("engine listening", "addr", addr, "mode", cfg.mode)
 
 	errCh := make(chan error, 2)

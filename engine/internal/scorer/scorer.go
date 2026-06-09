@@ -1,10 +1,7 @@
-// Package scorer implements the engine's online suspicion scorer. Each new
-// edge is scored incrementally as a product of three signals: frequency-rarity
-// (how unusual is this tuple?), temporal decay (does it reinforce a recent
-// chain?), and structural lift (does it cross a host boundary or touch a
-// sensitive resource?). When the mean score of any connected subgraph crosses
-// the configured threshold, the scorer emits a Signal so the chain extractor
-// can run.
+// Package scorer implements the engine's online suspicion scorer. Phase 1 uses
+// frequency-rarity only: how unusual is this (parent, child) image tuple?
+// When the mean score of any connected subgraph crosses the configured
+// threshold, the scorer emits a Signal so the chain extractor can run.
 package scorer
 
 import (
@@ -91,14 +88,12 @@ func (s *Scorer) SetAuthKind(e *types.Edge, kind string) {
 	s.authKinds[e.ID] = kind
 }
 
-// ScoreEdge computes the composite score for e, updates internal state, and
-// emits a Signal if the resulting component mean crosses Threshold.
+// ScoreEdge computes the frequency-rarity score for e (Phase 1), updates
+// internal state, and emits a Signal if the resulting component mean crosses
+// Threshold.
 func (s *Scorer) ScoreEdge(e *types.Edge, g *graph.Graph) float64 {
-	decay := s.temporalDecay(e)
 	s.observeTouch(e)
-	fr := s.freqRarity(e, g)
-	lift := s.structuralLift(e, g)
-	score := fr * decay * lift
+	score := s.freqRarity(e, g)
 
 	s.mu.Lock()
 	s.edgeScores[e.ID] = score

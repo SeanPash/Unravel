@@ -25,7 +25,7 @@ the narrator touches an LLM. All other components are pure Go.
 
 ## Quickstart: Replay mode
 
-No Splunk instance or lab required. Prerequisites: Go 1.22+ and Node 20+.
+No Splunk instance or lab required. Prerequisites: Go 1.25+ and Node 20+.
 
 ```bash
 cd engine
@@ -45,8 +45,11 @@ cd engine
   --mode=live \
   --splunk-url=https://<splunk>:8089 \
   --splunk-token=<token> \
-  --anthropic-key=$ANTHROPIC_API_KEY
+  --anthropic-key=$ANTHROPIC_API_KEY \
+  --insecure
 ```
+
+Add `--insecure` for self-signed certs (GOAD and most lab Splunk installs). Omit it for a Splunk instance with a valid CA-signed certificate.
 
 See `spec/sean-ui-lab.md` for lab bring-up instructions (GOAD-lite 3-VM
 topology, Splunk Universal Forwarder configuration, and the Python attack

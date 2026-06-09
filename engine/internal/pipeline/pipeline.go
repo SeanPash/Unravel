@@ -7,7 +7,6 @@ package pipeline
 import (
 	"context"
 	"errors"
-	"fmt"
 	"log/slog"
 	"strconv"
 	"sync"
@@ -112,7 +111,7 @@ func (p *Pipeline) handleRaw(raw splunk.RawEvent) {
 		}
 		return
 	}
-	updates := materialize(p.cfg.Graph, p.cfg.Scorer, parsed)
+	updates := materialize(p.cfg.Graph, parsed)
 	for _, u := range updates {
 		p.broadcastGraphUpdate(u.node, u.edge)
 		score := p.cfg.Scorer.ScoreEdge(u.edge, p.cfg.Graph)
@@ -231,24 +230,20 @@ type edgeUpdate struct {
 	edge *types.Edge
 }
 
-// parse dispatches to the per-source schema parser.
+// parse dispatches to the per-source schema parser. Phase 1: Sysmon only.
 func parse(raw splunk.RawEvent) (any, error) {
 	switch raw.Kind {
 	case splunk.SourceSysmon:
 		return schema.ParseSysmon(raw.Raw)
-	case splunk.SourceWinsec:
-		return schema.ParseWinSec(raw.Raw)
-	case splunk.SourceADAudit:
-		return schema.ParseADAudit(raw.Raw)
 	default:
-		return nil, fmt.Errorf("unknown source kind %q", raw.Kind)
+		return nil, schema.ErrUnsupportedEvent
 	}
 }
 
 // materialize converts a typed event into one or more graph node+edge pairs.
 // Each returned edge has been appended to g; the caller is responsible for
-// scoring and broadcasting.
-func materialize(g *graph.Graph, s *scorer.Scorer, ev any) []edgeUpdate {
+// scoring and broadcasting. Phase 1: Sysmon EID 1 (ProcessCreate) only.
+func materialize(g *graph.Graph, ev any) []edgeUpdate {
 	switch e := ev.(type) {
 	case types.ProcessCreate:
 		parent := g.FindOrCreateNode(types.NodeKindProcess, processKey(e.Host, e.ParentPID), labelImage(e.ParentImage), map[string]any{
@@ -262,69 +257,12 @@ func materialize(g *graph.Graph, s *scorer.Scorer, ev any) []edgeUpdate {
 		})
 		edge := g.AppendEdge(parent, child, types.EdgeKindSpawned, e.TS, 0, e.EventID)
 		return []edgeUpdate{{node: child, edge: edge}}
-
-	case types.ProcessAccess:
-		src := g.FindOrCreateNode(types.NodeKindProcess, processKey(e.Host, e.SourcePID), labelImage(e.SourceImage), map[string]any{
-			"pid":  e.SourcePID,
-			"host": e.Host,
-		})
-		dst := g.FindOrCreateNode(types.NodeKindProcess, processKey(e.Host, e.TargetPID), labelImage(e.TargetImage), map[string]any{
-			"pid":  e.TargetPID,
-			"host": e.Host,
-		})
-		kind := types.EdgeKindAccessedCredential
-		if isLSASS(e.TargetImage) {
-			kind = types.EdgeKindDumpedMemoryOf
-		}
-		edge := g.AppendEdge(src, dst, kind, e.TS, 0, e.EventID)
-		return []edgeUpdate{{node: dst, edge: edge}}
-
-	case types.LogonSuccess:
-		user := g.FindOrCreateNode(types.NodeKindUser, userKey(e.TargetDomain, e.TargetUser), labelUser(e.TargetDomain, e.TargetUser), map[string]any{
-			"sid":  e.TargetSID,
-			"host": e.Host,
-		})
-		host := g.FindOrCreateNode(types.NodeKindHost, e.Host, e.Host, map[string]any{
-			"ip": e.IPAddress,
-		})
-		edge := g.AppendEdge(user, host, types.EdgeKindAuthenticatedAs, e.TS, 0, e.EventID)
-		s.SetAuthKind(edge, "interactive")
-		return []edgeUpdate{{node: host, edge: edge}}
-
-	case types.KerberosService:
-		user := g.FindOrCreateNode(types.NodeKindUser, userKey(e.TargetDomain, e.TargetUser), labelUser(e.TargetDomain, e.TargetUser), map[string]any{
-			"host": e.Host,
-		})
-		target := g.FindOrCreateNode(types.NodeKindHost, e.ServiceName, e.ServiceName, map[string]any{
-			"ip": e.IPAddress,
-		})
-		edge := g.AppendEdge(user, target, types.EdgeKindAuthenticatedAs, e.TS, 0, e.EventID)
-		s.SetAuthKind(edge, "kerberos")
-		return []edgeUpdate{{node: target, edge: edge}}
-
-	case types.FileCreate, types.NetworkConnect, types.LogonFailure, types.SpecialLogon, types.KerberosTGT, types.ADEvent:
-		// Recognized but not yet mapped to graph edges in Phase 1.
-		return nil
 	}
 	return nil
 }
 
 func processKey(host string, pid int) string {
 	return host + ":" + strconv.Itoa(pid)
-}
-
-func userKey(domain, user string) string {
-	if domain == "" {
-		return user
-	}
-	return domain + "\\" + user
-}
-
-func labelUser(domain, user string) string {
-	if domain == "" {
-		return user
-	}
-	return domain + "\\" + user
 }
 
 // labelImage returns the trailing path component (e.g. "powershell.exe") so
@@ -338,6 +276,3 @@ func labelImage(path string) string {
 	return path
 }
 
-func isLSASS(image string) bool {
-	return labelImage(image) == "lsass.exe"
-}
