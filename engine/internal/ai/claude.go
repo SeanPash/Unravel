@@ -29,6 +29,7 @@ type ClaudeConfig struct {
 	BaseURL    string
 	HTTPClient *http.Client
 	MaxTokens  int
+	Searcher   SplunkSearcher
 }
 
 // ClaudeNarrator calls the Anthropic Messages API with prompt caching enabled
@@ -143,6 +144,110 @@ You MUST respond with a single JSON object, no surrounding prose, matching exact
 }
 
 Keep the narrative concrete and grounded in the supplied steps. Hypotheses are claims that go beyond the observed evidence; actions are short imperative containment steps an oncall responder can take immediately.`
+
+const maxRounds = 3
+
+// narratorTools is the tool menu sent to Claude on every narration request.
+// Tool definitions are static - they contribute to the cacheable prefix.
+var narratorTools = []claudeTool{
+	{
+		Name:        "lookup_process_reputation",
+		Description: "Look up whether a process name is flagged in the threat intelligence index.",
+		InputSchema: claudeToolSchema{
+			Type: "object",
+			Properties: map[string]claudeSchemaProperty{
+				"name": {Type: "string", Description: "Process image name, e.g. lsass.exe"},
+			},
+			Required: []string{"name"},
+		},
+	},
+	{
+		Name:        "get_account_logon_history",
+		Description: "Retrieve recent Windows logon and failure events for a user account.",
+		InputSchema: claudeToolSchema{
+			Type: "object",
+			Properties: map[string]claudeSchemaProperty{
+				"username": {Type: "string", Description: "SAM account name, e.g. administrator"},
+			},
+			Required: []string{"username"},
+		},
+	},
+	{
+		Name:        "fetch_raw_events",
+		Description: "Fetch raw log lines for specific Windows EventCode values from the chain steps.",
+		InputSchema: claudeToolSchema{
+			Type: "object",
+			Properties: map[string]claudeSchemaProperty{
+				"event_ids": {
+					Type:        "array",
+					Items:       &claudeSchemaProperty{Type: "string"},
+					Description: "EventCode values from the chain steps, e.g. [\"1\",\"10\"]",
+				},
+			},
+			Required: []string{"event_ids"},
+		},
+	},
+}
+
+// dispatchTool builds the SPL for name, runs it via the configured Searcher,
+// and returns a JSON string suitable for a tool_result content block.
+func (c *ClaudeNarrator) dispatchTool(ctx context.Context, name string, input map[string]any) string {
+	query, err := buildSPL(name, input)
+	if err != nil {
+		return fmt.Sprintf(`{"error":%q}`, err.Error())
+	}
+	rows, err := c.cfg.Searcher.Search(ctx, query)
+	if err != nil {
+		return `{"error":"search unavailable"}`
+	}
+	b, _ := json.Marshal(map[string]any{"rows": rows})
+	return string(b)
+}
+
+// buildSPL returns the SPL query for a given tool name and input parameters.
+func buildSPL(name string, input map[string]any) (string, error) {
+	switch name {
+	case "lookup_process_reputation":
+		n, _ := input["name"].(string)
+		if n == "" {
+			return "", fmt.Errorf("missing name")
+		}
+		return fmt.Sprintf(
+			`search index=threat_intel process_name="%s" | head 5 | fields process_name,reputation,category,source`, n,
+		), nil
+
+	case "get_account_logon_history":
+		u, _ := input["username"].(string)
+		if u == "" {
+			return "", fmt.Errorf("missing username")
+		}
+		return fmt.Sprintf(
+			`search index=winsec (EventCode=4624 OR EventCode=4625) Account_Name="%s" earliest=-24h | head 20 | fields _time,EventCode,IpAddress,Workstation_Name`, u,
+		), nil
+
+	case "fetch_raw_events":
+		ids, _ := input["event_ids"].([]any)
+		if len(ids) == 0 {
+			return "", fmt.Errorf("missing event_ids")
+		}
+		parts := make([]string, 0, len(ids))
+		for _, id := range ids {
+			if s, ok := id.(string); ok && s != "" {
+				parts = append(parts, "EventCode="+s)
+			}
+		}
+		if len(parts) == 0 {
+			return "", fmt.Errorf("no valid event_ids")
+		}
+		return fmt.Sprintf(
+			`search index=* (%s) | head 10 | fields _time,EventCode,host,source,_raw`,
+			strings.Join(parts, " OR "),
+		), nil
+
+	default:
+		return "", fmt.Errorf("unknown tool: %s", name)
+	}
+}
 
 type claudeCacheControl struct {
 	Type string `json:"type"`

@@ -3,6 +3,7 @@ package ai
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -118,5 +119,95 @@ func TestClaudeNarratorReturnsErrorOnNon2xx(t *testing.T) {
 	n := NewClaude(ClaudeConfig{APIKey: "k", BaseURL: srv.URL})
 	if _, err := n.Narrate(context.Background(), types.ChainResultPayload{}); err == nil {
 		t.Fatal("want error on 429, got nil")
+	}
+}
+
+// fakeSearcher is a test double for SplunkSearcher. Define once; used across
+// multiple tests in this file.
+type fakeSearcher struct {
+	fn func(context.Context, string) ([]map[string]any, error)
+}
+
+func (f *fakeSearcher) Search(ctx context.Context, query string) ([]map[string]any, error) {
+	return f.fn(ctx, query)
+}
+
+func TestDispatchToolLookupProcessReputation(t *testing.T) {
+	t.Parallel()
+	var gotQuery string
+	n := NewClaude(ClaudeConfig{
+		APIKey: "k",
+		Searcher: &fakeSearcher{fn: func(_ context.Context, q string) ([]map[string]any, error) {
+			gotQuery = q
+			return []map[string]any{{"process_name": "lsass.exe", "reputation": "malicious"}}, nil
+		}},
+	})
+	result := n.dispatchTool(context.Background(), "lookup_process_reputation", map[string]any{"name": "lsass.exe"})
+	if !strings.Contains(gotQuery, "index=threat_intel") {
+		t.Errorf("query = %q, want index=threat_intel", gotQuery)
+	}
+	if !strings.Contains(gotQuery, "lsass.exe") {
+		t.Errorf("query = %q, want lsass.exe", gotQuery)
+	}
+	if !strings.Contains(result, "malicious") {
+		t.Errorf("result = %q, want malicious", result)
+	}
+}
+
+func TestDispatchToolGetAccountLogonHistory(t *testing.T) {
+	t.Parallel()
+	var gotQuery string
+	n := NewClaude(ClaudeConfig{
+		APIKey: "k",
+		Searcher: &fakeSearcher{fn: func(_ context.Context, q string) ([]map[string]any, error) {
+			gotQuery = q
+			return []map[string]any{{"EventCode": "4624", "IpAddress": "10.0.0.1"}}, nil
+		}},
+	})
+	result := n.dispatchTool(context.Background(), "get_account_logon_history", map[string]any{"username": "administrator"})
+	if !strings.Contains(gotQuery, "index=winsec") {
+		t.Errorf("query = %q, want index=winsec", gotQuery)
+	}
+	if !strings.Contains(gotQuery, "administrator") {
+		t.Errorf("query = %q, want administrator", gotQuery)
+	}
+	if !strings.Contains(result, "4624") {
+		t.Errorf("result = %q, want 4624", result)
+	}
+}
+
+func TestDispatchToolFetchRawEvents(t *testing.T) {
+	t.Parallel()
+	var gotQuery string
+	n := NewClaude(ClaudeConfig{
+		APIKey: "k",
+		Searcher: &fakeSearcher{fn: func(_ context.Context, q string) ([]map[string]any, error) {
+			gotQuery = q
+			return []map[string]any{{"EventCode": "1", "_raw": "Process Create"}}, nil
+		}},
+	})
+	result := n.dispatchTool(context.Background(), "fetch_raw_events", map[string]any{"event_ids": []any{"1", "10"}})
+	if !strings.Contains(gotQuery, "EventCode=1") {
+		t.Errorf("query = %q, want EventCode=1", gotQuery)
+	}
+	if !strings.Contains(gotQuery, "EventCode=10") {
+		t.Errorf("query = %q, want EventCode=10", gotQuery)
+	}
+	if !strings.Contains(result, "Process Create") {
+		t.Errorf("result = %q, want Process Create", result)
+	}
+}
+
+func TestDispatchToolSearchError(t *testing.T) {
+	t.Parallel()
+	n := NewClaude(ClaudeConfig{
+		APIKey: "k",
+		Searcher: &fakeSearcher{fn: func(_ context.Context, _ string) ([]map[string]any, error) {
+			return nil, fmt.Errorf("splunk unavailable")
+		}},
+	})
+	result := n.dispatchTool(context.Background(), "lookup_process_reputation", map[string]any{"name": "cmd.exe"})
+	if !strings.Contains(result, "search unavailable") {
+		t.Errorf("result = %q, want search unavailable", result)
 	}
 }
