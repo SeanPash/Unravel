@@ -24,16 +24,20 @@ import (
 )
 
 type config struct {
-	mode        string
-	port        int
-	replaySpeed float64
-	testdataDir string
-	splunkURL   string
-	splunkToken string
-	splunkQuery string
-	insecure    bool
-	threshold   float64
-	apiKey      string
+	mode           string
+	port           int
+	replaySpeed    float64
+	testdataDir    string
+	splunkURL      string
+	splunkToken    string
+	splunkQuery    string
+	insecure       bool
+	threshold      float64
+	apiKey         string
+	hecURL         string
+	hecToken       string
+	hecIndex       string
+	hecSourcetype  string
 }
 
 func main() {
@@ -59,6 +63,10 @@ func parseFlags() config {
 	flag.BoolVar(&cfg.insecure, "insecure", true, "skip TLS verification for the Splunk endpoint")
 	flag.Float64Var(&cfg.threshold, "threshold", 0.5, "scorer trigger threshold")
 	flag.StringVar(&cfg.apiKey, "anthropic-key", os.Getenv("ANTHROPIC_API_KEY"), "Anthropic API key (omit to fall back to stub narrator)")
+	flag.StringVar(&cfg.hecURL, "hec-url", "", "Splunk HEC base URL for chain result write-back, e.g. https://splunk:8088 (disabled when empty)")
+	flag.StringVar(&cfg.hecToken, "hec-token", "", "Splunk HEC token (required when --hec-url is set)")
+	flag.StringVar(&cfg.hecIndex, "hec-index", "", "Splunk index for HEC write-back (uses token default when empty)")
+	flag.StringVar(&cfg.hecSourcetype, "hec-sourcetype", "causal_chain_result", "Splunk sourcetype for HEC write-back")
 	flag.Parse()
 	return cfg
 }
@@ -83,12 +91,18 @@ func run(cfg config, logger *slog.Logger) error {
 	bcast := api.NewBroadcaster()
 	defer bcast.Close()
 
+	hec, err := buildHEC(cfg, logger)
+	if err != nil {
+		return fmt.Errorf("hec: %w", err)
+	}
+
 	p, err := pipeline.New(pipeline.Config{
 		Source:      source,
 		Graph:       g,
 		Scorer:      sc,
 		Narrator:    narrator,
 		Broadcaster: bcast,
+		HEC:         hec,
 		Logger:      logger,
 	})
 	if err != nil {
@@ -158,6 +172,26 @@ func startSource(s splunk.Source, ctx context.Context) {
 	case *splunk.RESTSource:
 		ms.Start(ctx)
 	}
+}
+
+// buildHEC returns a nil HECSink (disabling write-back) when --hec-url is
+// unset, so replay and ai-off modes work without any Splunk instance.
+func buildHEC(cfg config, logger *slog.Logger) (pipeline.HECSink, error) {
+	if cfg.hecURL == "" {
+		return nil, nil
+	}
+	client, err := splunk.NewHECClient(splunk.HECConfig{
+		URL:        cfg.hecURL,
+		Token:      cfg.hecToken,
+		Index:      cfg.hecIndex,
+		Sourcetype: cfg.hecSourcetype,
+		Insecure:   cfg.insecure,
+	})
+	if err != nil {
+		return nil, err
+	}
+	logger.Info("HEC write-back enabled", "url", cfg.hecURL, "index", cfg.hecIndex, "sourcetype", cfg.hecSourcetype)
+	return client, nil
 }
 
 func buildNarrator(cfg config, logger *slog.Logger) ai.Narrator {

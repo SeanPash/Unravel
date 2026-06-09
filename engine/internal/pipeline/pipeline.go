@@ -23,15 +23,24 @@ import (
 	"github.com/luigifernandez/unravel/engine/internal/types"
 )
 
+// HECSink is satisfied by *splunk.HECClient. Defined here so the pipeline
+// package does not import the splunk package circularly via its own type.
+type HECSink interface {
+	Send(ctx context.Context, event any) error
+}
+
 // Config holds the wired-up dependencies. All fields are required except
-// Logger, which defaults to slog.Default().
+// Logger (defaults to slog.Default()) and HEC (nil disables write-back).
 type Config struct {
 	Source      splunk.Source
 	Graph       *graph.Graph
 	Scorer      *scorer.Scorer
 	Narrator    ai.Narrator
 	Broadcaster *api.Broadcaster
-	Logger      *slog.Logger
+	// HEC is the optional Splunk write-back sink. When nil, chain results
+	// are not forwarded to Splunk.
+	HEC    HECSink
+	Logger *slog.Logger
 
 	// NarrationTimeout caps each LLM call. Defaults to 20s.
 	NarrationTimeout time.Duration
@@ -191,6 +200,14 @@ func (p *Pipeline) handleSignal(ctx context.Context, sig scorer.Signal) {
 	chainMsg, err := types.NewMessage(types.MsgTypeChainResult, result)
 	if err == nil {
 		p.cfg.Broadcaster.Send(chainMsg)
+	}
+
+	if p.cfg.HEC != nil {
+		hctx, hcancel := context.WithTimeout(ctx, 5*time.Second)
+		if herr := p.cfg.HEC.Send(hctx, result); herr != nil {
+			p.cfg.Logger.Warn("hec write-back failed", "err", herr)
+		}
+		hcancel()
 	}
 
 	nctx, cancel := context.WithTimeout(ctx, p.cfg.NarrationTimeout)
