@@ -1,73 +1,42 @@
-# React + TypeScript + Vite
+# Causal Reconstruction Engine - UI
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+React 18 + TypeScript + Cytoscape.js front-end for the Causal Reconstruction Engine. Connects to the engine's WebSocket server and renders the live provenance graph, suspicion scores, and AI narration.
 
-Currently, two official plugins are available:
+## Prerequisites
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+Node 20 or later.
 
-## React Compiler
+## Commands
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+```bash
+# Install dependencies
+npm install
 
-## Expanding the ESLint configuration
+# Development server (proxies WebSocket to engine on :8080 by default)
+npm run dev
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+# Run vitest unit tests
+npm test
 
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
+# Start the Node mock WebSocket server (for UI-only development, no engine needed)
+npm run mock
 
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+# Build for production (output to dist/)
+npm run build
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+## WebSocket URL
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+The UI connects to `ws://${window.location.host}/ws` by default, which works when served from the engine binary (port 8080). To point at a different engine during development, set `VITE_WS_URL`:
 
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```bash
+VITE_WS_URL=ws://localhost:9090/ws npm run dev
 ```
+
+## Development vs production
+
+During development, use `npm run dev` (Vite dev server with HMR). In production, the engine binary serves the built assets directly after Luigi's L1 is complete, so no separate server is needed. Build with `npm run build`, then `make release` from `engine/` copies the output into the embed directory and compiles it into the binary.
+
+## Mock server
+
+`npm run mock` starts `mock-server/server.ts`, a small WebSocket server that replays the canned kill-chain fixture at `mock-server/fixtures/chain-phishing.json`. Use this to develop the UI without a running engine. Switch to the real engine by changing the WebSocket URL; the message format is identical.
