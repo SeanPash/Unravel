@@ -65,35 +65,37 @@ func (c *ClaudeNarrator) Narrate(ctx context.Context, chain types.ChainResultPay
 		return types.NarrationPayload{}, fmt.Errorf("marshal chain: %w", err)
 	}
 
-	reqBody := claudeRequest{
+	resp, err := c.doRequest(ctx, claudeRequest{
 		Model:     c.cfg.Model,
 		MaxTokens: c.cfg.MaxTokens,
 		System: []claudeSystemBlock{
-			{
-				Type:         "text",
-				Text:         systemPrompt,
-				CacheControl: &claudeCacheControl{Type: "ephemeral"},
-			},
+			{Type: "text", Text: systemPrompt, CacheControl: &claudeCacheControl{Type: "ephemeral"}},
 		},
 		Messages: []claudeMessage{
-			{
-				Role: "user",
-				Content: []claudeContentBlock{
-					{Type: "text", Text: "Chain JSON:\n" + string(chainJSON)},
-				},
-			},
+			{Role: "user", Content: []claudeContentBlock{{Type: "text", Text: "Chain JSON:\n" + string(chainJSON)}}},
 		},
+	})
+	if err != nil {
+		return types.NarrationPayload{}, err
 	}
 
+	text := extractText(resp)
+	if text == "" {
+		return types.NarrationPayload{}, fmt.Errorf("claude returned no text content")
+	}
+	return parseNarration(text)
+}
+
+func (c *ClaudeNarrator) doRequest(ctx context.Context, reqBody claudeRequest) (claudeResponse, error) {
 	raw, err := json.Marshal(reqBody)
 	if err != nil {
-		return types.NarrationPayload{}, fmt.Errorf("marshal request: %w", err)
+		return claudeResponse{}, fmt.Errorf("marshal request: %w", err)
 	}
 
 	endpoint := strings.TrimRight(c.cfg.BaseURL, "/") + "/v1/messages"
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(raw))
 	if err != nil {
-		return types.NarrationPayload{}, err
+		return claudeResponse{}, err
 	}
 	req.Header.Set("x-api-key", c.cfg.APIKey)
 	req.Header.Set("anthropic-version", "2023-06-01")
@@ -101,28 +103,23 @@ func (c *ClaudeNarrator) Narrate(ctx context.Context, chain types.ChainResultPay
 
 	resp, err := c.cfg.HTTPClient.Do(req)
 	if err != nil {
-		return types.NarrationPayload{}, fmt.Errorf("claude request: %w", err)
+		return claudeResponse{}, fmt.Errorf("claude request: %w", err)
 	}
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return types.NarrationPayload{}, fmt.Errorf("read response: %w", err)
+		return claudeResponse{}, fmt.Errorf("read response: %w", err)
 	}
 	if resp.StatusCode/100 != 2 {
-		return types.NarrationPayload{}, fmt.Errorf("claude status %d: %s", resp.StatusCode, body)
+		return claudeResponse{}, fmt.Errorf("claude status %d: %s", resp.StatusCode, body)
 	}
 
 	var decoded claudeResponse
 	if err := json.Unmarshal(body, &decoded); err != nil {
-		return types.NarrationPayload{}, fmt.Errorf("decode claude response: %w", err)
+		return claudeResponse{}, fmt.Errorf("decode claude response: %w", err)
 	}
-
-	text := extractText(decoded)
-	if text == "" {
-		return types.NarrationPayload{}, fmt.Errorf("claude returned no text content")
-	}
-	return parseNarration(text)
+	return decoded, nil
 }
 
 // systemPrompt is the static, cacheable preamble. Keeping the schema example
@@ -158,8 +155,13 @@ type claudeSystemBlock struct {
 }
 
 type claudeContentBlock struct {
-	Type string `json:"type"`
-	Text string `json:"text"`
+	Type      string         `json:"type"`
+	Text      string         `json:"text,omitempty"`
+	ID        string         `json:"id,omitempty"`
+	Name      string         `json:"name,omitempty"`
+	Input     map[string]any `json:"input,omitempty"`
+	ToolUseID string         `json:"tool_use_id,omitempty"`
+	Content   string         `json:"content,omitempty"`
 }
 
 type claudeMessage struct {
@@ -172,13 +174,30 @@ type claudeRequest struct {
 	MaxTokens int                 `json:"max_tokens"`
 	System    []claudeSystemBlock `json:"system"`
 	Messages  []claudeMessage     `json:"messages"`
+	Tools     []claudeTool        `json:"tools,omitempty"`
+}
+
+type claudeTool struct {
+	Name        string           `json:"name"`
+	Description string           `json:"description"`
+	InputSchema claudeToolSchema `json:"input_schema"`
+}
+
+type claudeToolSchema struct {
+	Type       string                          `json:"type"`
+	Properties map[string]claudeSchemaProperty `json:"properties"`
+	Required   []string                        `json:"required"`
+}
+
+type claudeSchemaProperty struct {
+	Type        string                `json:"type"`
+	Description string                `json:"description,omitempty"`
+	Items       *claudeSchemaProperty `json:"items,omitempty"`
 }
 
 type claudeResponse struct {
-	Content []struct {
-		Type string `json:"type"`
-		Text string `json:"text"`
-	} `json:"content"`
+	StopReason string               `json:"stop_reason"`
+	Content    []claudeContentBlock `json:"content"`
 }
 
 func extractText(r claudeResponse) string {

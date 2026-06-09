@@ -61,10 +61,7 @@ func TestClaudeNarratorSendsCachedSystemPrompt(t *testing.T) {
 			t.Errorf("system prompt missing schema instructions")
 		}
 		resp := claudeResponse{
-			Content: []struct {
-				Type string `json:"type"`
-				Text string `json:"text"`
-			}{
+			Content: []claudeContentBlock{
 				{Type: "text", Text: `{"text":"Attack chain summary.","hypotheses":["More hosts touched"],"actions":["Isolate WS01"]}`},
 			},
 		}
@@ -96,10 +93,7 @@ func TestClaudeNarratorParsesCodeFence(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		fenced := "```json\n{\"text\":\"ok\",\"hypotheses\":[],\"actions\":[]}\n```"
 		resp := claudeResponse{
-			Content: []struct {
-				Type string `json:"type"`
-				Text string `json:"text"`
-			}{{Type: "text", Text: fenced}},
+			Content: []claudeContentBlock{{Type: "text", Text: fenced}},
 		}
 		_ = json.NewEncoder(w).Encode(resp)
 	}))
