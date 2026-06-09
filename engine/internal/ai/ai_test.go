@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/luigifernandez/unravel/engine/internal/types"
@@ -214,15 +215,15 @@ func TestDispatchToolSearchError(t *testing.T) {
 
 func TestClaudeNarratorToolUseLoop(t *testing.T) {
 	t.Parallel()
-	callCount := 0
+	var callCount atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		callCount++
+		callCount.Add(1)
 		var reqBody claudeRequest
 		body, _ := io.ReadAll(r.Body)
 		if err := json.Unmarshal(body, &reqBody); err != nil {
 			t.Fatalf("decode request: %v", err)
 		}
-		if callCount == 1 {
+		if callCount.Load() == 1 {
 			if len(reqBody.Tools) != 3 {
 				t.Errorf("tools = %d, want 3", len(reqBody.Tools))
 			}
@@ -263,8 +264,8 @@ func TestClaudeNarratorToolUseLoop(t *testing.T) {
 	if !strings.Contains(got.Text, "lsass.exe") {
 		t.Errorf("text = %q, want lsass.exe mention", got.Text)
 	}
-	if callCount != 2 {
-		t.Errorf("API calls = %d, want 2", callCount)
+	if callCount.Load() != 2 {
+		t.Errorf("API calls = %d, want 2", callCount.Load())
 	}
 }
 
@@ -342,13 +343,13 @@ func TestClaudeNarratorToolSearchError(t *testing.T) {
 
 func TestClaudeNarratorMaxRoundsExceeded(t *testing.T) {
 	t.Parallel()
-	callCount := 0
+	var callCount atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		callCount++
+		callCount.Add(1)
 		_ = json.NewEncoder(w).Encode(claudeResponse{
 			StopReason: "tool_use",
 			Content: []claudeContentBlock{
-				{Type: "tool_use", ID: fmt.Sprintf("tu_%d", callCount), Name: "lookup_process_reputation", Input: map[string]any{"name": "x.exe"}},
+				{Type: "tool_use", ID: fmt.Sprintf("tu_%d", callCount.Load()), Name: "lookup_process_reputation", Input: map[string]any{"name": "x.exe"}},
 			},
 		})
 	}))
@@ -365,7 +366,7 @@ func TestClaudeNarratorMaxRoundsExceeded(t *testing.T) {
 	if err == nil {
 		t.Fatal("want error when max rounds exceeded, got nil")
 	}
-	if callCount != maxRounds {
-		t.Errorf("API calls = %d, want %d", callCount, maxRounds)
+	if int(callCount.Load()) != maxRounds {
+		t.Errorf("API calls = %d, want %d", callCount.Load(), maxRounds)
 	}
 }
