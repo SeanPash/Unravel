@@ -203,7 +203,16 @@ func buildNarrator(cfg config, logger *slog.Logger) ai.Narrator {
 		}
 		return ai.NewStub()
 	}
-	return ai.NewClaude(ai.ClaudeConfig{APIKey: cfg.apiKey})
+	var searcher ai.SplunkSearcher
+	switch cfg.mode {
+	case "live":
+		searcher = splunk.NewRESTSearcher(cfg.splunkURL, cfg.splunkToken, cfg.insecure)
+		logger.Info("narrator enrichment enabled", "splunk_url", cfg.splunkURL)
+	default:
+		searcher = splunk.NewMockSearcher(cfg.testdataDir)
+		logger.Info("narrator enrichment using mock fixtures", "testdata_dir", cfg.testdataDir)
+	}
+	return ai.NewClaude(ai.ClaudeConfig{APIKey: cfg.apiKey, Searcher: searcher})
 }
 
 // discoverTimelines returns every *.json file in dir, preferring a single
