@@ -1,0 +1,6 @@
+[
+  {"_time": "2024-01-15T14:22:01Z", "EventCode": "4624", "IpAddress": "192.168.1.101", "Workstation_Name": "WS01"},
+  {"_time": "2024-01-15T14:23:15Z", "EventCode": "4625", "IpAddress": "192.168.1.102", "Workstation_Name": "WS02"},
+  {"_time": "2024-01-15T14:23:47Z", "EventCode": "4625", "IpAddress": "192.168.1.102", "Workstation_Name": "WS02"},
+  {"_time": "2024-01-15T14:24:02Z", "EventCode": "4624", "IpAddress": "192.168.1.102", "Workstation_Name": "WS02"}
+]

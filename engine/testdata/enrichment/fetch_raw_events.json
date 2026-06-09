@@ -1,0 +1,16 @@
+[
+  {
+    "_time": "2024-01-15T14:22:00Z",
+    "EventCode": "1",
+    "host": "WS01",
+    "source": "WinEventLog:Microsoft-Windows-Sysmon/Operational",
+    "_raw": "Process Create: RuleName: Image: C:\\Windows\\System32\\cmd.exe ParentImage: C:\\Program Files\\Microsoft Office\\WINWORD.EXE"
+  },
+  {
+    "_time": "2024-01-15T14:22:30Z",
+    "EventCode": "10",
+    "host": "WS01",
+    "source": "WinEventLog:Microsoft-Windows-Sysmon/Operational",
+    "_raw": "ProcessAccess: TargetImage: C:\\Windows\\System32\\lsass.exe SourceImage: C:\\Windows\\System32\\rundll32.exe"
+  }
+]

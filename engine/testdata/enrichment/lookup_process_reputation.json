@@ -1,0 +1,8 @@
+[
+  {
+    "process_name": "lsass.exe",
+    "reputation": "malicious",
+    "category": "credential-access",
+    "source": "internal-threat-intel"
+  }
+]
