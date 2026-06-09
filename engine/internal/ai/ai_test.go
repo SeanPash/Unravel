@@ -211,3 +211,161 @@ func TestDispatchToolSearchError(t *testing.T) {
 		t.Errorf("result = %q, want search unavailable", result)
 	}
 }
+
+func TestClaudeNarratorToolUseLoop(t *testing.T) {
+	t.Parallel()
+	callCount := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		callCount++
+		var reqBody claudeRequest
+		body, _ := io.ReadAll(r.Body)
+		if err := json.Unmarshal(body, &reqBody); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if callCount == 1 {
+			if len(reqBody.Tools) != 3 {
+				t.Errorf("tools = %d, want 3", len(reqBody.Tools))
+			}
+			_ = json.NewEncoder(w).Encode(claudeResponse{
+				StopReason: "tool_use",
+				Content: []claudeContentBlock{
+					{Type: "tool_use", ID: "tu_1", Name: "lookup_process_reputation", Input: map[string]any{"name": "lsass.exe"}},
+				},
+			})
+		} else {
+			if len(reqBody.Messages) < 3 {
+				t.Errorf("messages on round 2 = %d, want >= 3", len(reqBody.Messages))
+			}
+			_ = json.NewEncoder(w).Encode(claudeResponse{
+				StopReason: "end_turn",
+				Content: []claudeContentBlock{
+					{Type: "text", Text: `{"text":"Attack used lsass.exe (malicious).","hypotheses":["More hosts compromised"],"actions":["Isolate WS01"]}`},
+				},
+			})
+		}
+	}))
+	defer srv.Close()
+
+	n := NewClaude(ClaudeConfig{
+		APIKey:  "test-key",
+		BaseURL: srv.URL,
+		Searcher: &fakeSearcher{fn: func(_ context.Context, _ string) ([]map[string]any, error) {
+			return []map[string]any{{"reputation": "malicious"}}, nil
+		}},
+	})
+	got, err := n.Narrate(context.Background(), types.ChainResultPayload{
+		Confidence: 0.9,
+		Steps:      []types.ChainStep{{Description: "winword spawned cmd", Confidence: 0.9, TS: 1}},
+	})
+	if err != nil {
+		t.Fatalf("narrate: %v", err)
+	}
+	if !strings.Contains(got.Text, "lsass.exe") {
+		t.Errorf("text = %q, want lsass.exe mention", got.Text)
+	}
+	if callCount != 2 {
+		t.Errorf("API calls = %d, want 2", callCount)
+	}
+}
+
+func TestClaudeNarratorNoSearcherSkipsTools(t *testing.T) {
+	t.Parallel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var reqBody claudeRequest
+		body, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(body, &reqBody)
+		if len(reqBody.Tools) != 0 {
+			t.Errorf("tools = %d, want 0 when Searcher is nil", len(reqBody.Tools))
+		}
+		_ = json.NewEncoder(w).Encode(claudeResponse{
+			StopReason: "end_turn",
+			Content: []claudeContentBlock{
+				{Type: "text", Text: `{"text":"Summary.","hypotheses":[],"actions":[]}`},
+			},
+		})
+	}))
+	defer srv.Close()
+
+	n := NewClaude(ClaudeConfig{APIKey: "k", BaseURL: srv.URL})
+	if _, err := n.Narrate(context.Background(), types.ChainResultPayload{}); err != nil {
+		t.Fatalf("narrate: %v", err)
+	}
+}
+
+func TestClaudeNarratorToolSearchError(t *testing.T) {
+	t.Parallel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var reqBody claudeRequest
+		body, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(body, &reqBody)
+		hasTool := false
+		for _, msg := range reqBody.Messages {
+			for _, blk := range msg.Content {
+				if blk.Type == "tool_result" {
+					hasTool = true
+				}
+			}
+		}
+		if !hasTool {
+			_ = json.NewEncoder(w).Encode(claudeResponse{
+				StopReason: "tool_use",
+				Content: []claudeContentBlock{
+					{Type: "tool_use", ID: "tu_1", Name: "lookup_process_reputation", Input: map[string]any{"name": "cmd.exe"}},
+				},
+			})
+		} else {
+			_ = json.NewEncoder(w).Encode(claudeResponse{
+				StopReason: "end_turn",
+				Content: []claudeContentBlock{
+					{Type: "text", Text: `{"text":"Narration despite search error.","hypotheses":[],"actions":[]}`},
+				},
+			})
+		}
+	}))
+	defer srv.Close()
+
+	n := NewClaude(ClaudeConfig{
+		APIKey:  "k",
+		BaseURL: srv.URL,
+		Searcher: &fakeSearcher{fn: func(_ context.Context, _ string) ([]map[string]any, error) {
+			return nil, fmt.Errorf("splunk down")
+		}},
+	})
+	got, err := n.Narrate(context.Background(), types.ChainResultPayload{})
+	if err != nil {
+		t.Fatalf("want narration despite search error, got: %v", err)
+	}
+	if got.Text == "" {
+		t.Error("want non-empty text")
+	}
+}
+
+func TestClaudeNarratorMaxRoundsExceeded(t *testing.T) {
+	t.Parallel()
+	callCount := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		callCount++
+		_ = json.NewEncoder(w).Encode(claudeResponse{
+			StopReason: "tool_use",
+			Content: []claudeContentBlock{
+				{Type: "tool_use", ID: fmt.Sprintf("tu_%d", callCount), Name: "lookup_process_reputation", Input: map[string]any{"name": "x.exe"}},
+			},
+		})
+	}))
+	defer srv.Close()
+
+	n := NewClaude(ClaudeConfig{
+		APIKey:  "k",
+		BaseURL: srv.URL,
+		Searcher: &fakeSearcher{fn: func(_ context.Context, _ string) ([]map[string]any, error) {
+			return nil, nil
+		}},
+	})
+	_, err := n.Narrate(context.Background(), types.ChainResultPayload{})
+	if err == nil {
+		t.Fatal("want error when max rounds exceeded, got nil")
+	}
+	if callCount != maxRounds {
+		t.Errorf("API calls = %d, want %d", callCount, maxRounds)
+	}
+}

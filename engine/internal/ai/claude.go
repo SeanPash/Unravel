@@ -59,32 +59,68 @@ func NewClaude(cfg ClaudeConfig) *ClaudeNarrator {
 	return &ClaudeNarrator{cfg: cfg}
 }
 
-// Narrate sends the chain to Claude and decodes the structured response.
+// Narrate sends the chain to Claude, dispatching tool calls until Claude
+// produces a final end_turn response or maxRounds is exhausted.
 func (c *ClaudeNarrator) Narrate(ctx context.Context, chain types.ChainResultPayload) (types.NarrationPayload, error) {
 	chainJSON, err := json.Marshal(chain)
 	if err != nil {
 		return types.NarrationPayload{}, fmt.Errorf("marshal chain: %w", err)
 	}
 
-	resp, err := c.doRequest(ctx, claudeRequest{
-		Model:     c.cfg.Model,
-		MaxTokens: c.cfg.MaxTokens,
-		System: []claudeSystemBlock{
-			{Type: "text", Text: systemPrompt, CacheControl: &claudeCacheControl{Type: "ephemeral"}},
-		},
-		Messages: []claudeMessage{
-			{Role: "user", Content: []claudeContentBlock{{Type: "text", Text: "Chain JSON:\n" + string(chainJSON)}}},
-		},
-	})
-	if err != nil {
-		return types.NarrationPayload{}, err
+	messages := []claudeMessage{{
+		Role:    "user",
+		Content: []claudeContentBlock{{Type: "text", Text: "Chain JSON:\n" + string(chainJSON)}},
+	}}
+
+	var tools []claudeTool
+	if c.cfg.Searcher != nil {
+		tools = narratorTools
 	}
 
-	text := extractText(resp)
-	if text == "" {
-		return types.NarrationPayload{}, fmt.Errorf("claude returned no text content")
+	for i := 0; i < maxRounds; i++ {
+		resp, err := c.doRequest(ctx, claudeRequest{
+			Model:     c.cfg.Model,
+			MaxTokens: c.cfg.MaxTokens,
+			System:    []claudeSystemBlock{{Type: "text", Text: systemPrompt, CacheControl: &claudeCacheControl{Type: "ephemeral"}}},
+			Messages:  messages,
+			Tools:     tools,
+		})
+		if err != nil {
+			return types.NarrationPayload{}, err
+		}
+
+		hasToolUse := false
+		for _, b := range resp.Content {
+			if b.Type == "tool_use" {
+				hasToolUse = true
+				break
+			}
+		}
+
+		if !hasToolUse {
+			text := extractText(resp)
+			if text == "" {
+				return types.NarrationPayload{}, fmt.Errorf("claude returned no text content")
+			}
+			return parseNarration(text)
+		}
+
+		messages = append(messages, claudeMessage{Role: "assistant", Content: resp.Content})
+		var results []claudeContentBlock
+		for _, b := range resp.Content {
+			if b.Type != "tool_use" {
+				continue
+			}
+			results = append(results, claudeContentBlock{
+				Type:      "tool_result",
+				ToolUseID: b.ID,
+				Content:   c.dispatchTool(ctx, b.Name, b.Input),
+			})
+		}
+		messages = append(messages, claudeMessage{Role: "user", Content: results})
 	}
-	return parseNarration(text)
+
+	return types.NarrationPayload{}, fmt.Errorf("narrator exceeded %d rounds without completing", maxRounds)
 }
 
 func (c *ClaudeNarrator) doRequest(ctx context.Context, reqBody claudeRequest) (claudeResponse, error) {
