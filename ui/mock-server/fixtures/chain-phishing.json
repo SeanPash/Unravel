@@ -24,8 +24,8 @@
         "ParentImage": "C:\\Program Files\\Microsoft Office\\root\\Office16\\WINWORD.EXE",
         "CommandLine": "powershell.exe -nop -w hidden -enc JABzAD0ATgBlAHcALQBPAGIAagBlAGMAdAA=",
         "User": "NORTHPOLE\\jdoe",
-        "UtcTime": "2025-06-05 19:07:10.000",
-        "RecordNumber": "evt-001"
+        "UtcTime": "2025-06-05 05:07:10.000",
+        "RecordNumber": "20471"
       }
     }
   },
@@ -61,8 +61,8 @@
         "TargetImage": "C:\\Windows\\System32\\lsass.exe",
         "GrantedAccess": "0x1010",
         "CallTrace": "C:\\Windows\\SYSTEM32\\ntdll.dll+9d234",
-        "UtcTime": "2025-06-05 19:07:40.000",
-        "RecordNumber": "evt-002"
+        "UtcTime": "2025-06-05 05:07:40.000",
+        "RecordNumber": "20512"
       }
     }
   },
@@ -71,16 +71,18 @@
     "payload": {
       "event_id": "evt-003",
       "ts": 1749100075,
-      "source": "sysmon",
+      "source": "winsec",
       "raw": {
-        "EventID": "10",
+        "EventID": "4648",
         "host": "WS01",
-        "SourceImage": "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+        "SubjectUserName": "jdoe",
+        "SubjectDomainName": "NORTHPOLE",
         "TargetUserName": "Administrator",
         "TargetDomainName": "NORTHPOLE",
-        "GrantedAccess": "0x1fffff",
-        "UtcTime": "2025-06-05 19:07:55.000",
-        "RecordNumber": "evt-003"
+        "TargetServerName": "DC01.northpole.local",
+        "ProcessName": "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+        "IpAddress": "192.168.56.21",
+        "RecordNumber": "84512"
       }
     }
   },
@@ -98,7 +100,7 @@
         "LogonType": 3,
         "AuthenticationPackageName": "Kerberos",
         "IpAddress": "192.168.56.21",
-        "RecordNumber": "evt-004"
+        "RecordNumber": "98231"
       }
     }
   },
@@ -111,10 +113,10 @@
       "raw": {
         "EventID": "4672",
         "host": "DC01",
-        "TargetUserName": "Administrator",
+        "SubjectUserName": "Administrator",
         "SubjectDomainName": "NORTHPOLE",
         "PrivilegeList": "SeDebugPrivilege SeBackupPrivilege SeTcbPrivilege",
-        "RecordNumber": "evt-005"
+        "RecordNumber": "98233"
       }
     }
   },
