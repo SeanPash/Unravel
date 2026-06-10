@@ -7,6 +7,7 @@ const (
 	MsgTypeScoreUpdate = "score_update"
 	MsgTypeChainResult = "chain_result"
 	MsgTypeNarration   = "narration"
+	MsgTypeLogEvent    = "log_event"
 )
 
 type WSMessage struct {
@@ -40,6 +41,15 @@ type NarrationPayload struct {
 	Text       string   `json:"text"`
 	Hypotheses []string `json:"hypotheses"`
 	Actions    []string `json:"actions"`
+}
+
+// LogEventPayload carries the raw Splunk event behind a graph edge so the UI
+// can show source log evidence. EventID matches the edge's source_event_id.
+type LogEventPayload struct {
+	EventID string         `json:"event_id"`
+	TS      int64          `json:"ts"`
+	Source  string         `json:"source"`
+	Raw     map[string]any `json:"raw"`
 }
 
 func NewMessage(msgType string, payload any) (WSMessage, error) {

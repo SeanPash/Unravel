@@ -118,6 +118,9 @@ func (p *Pipeline) handleRaw(raw splunk.RawEvent) {
 		u.edge.Confidence = score
 		p.broadcastScore(u.edge.ID, score)
 	}
+	if len(updates) > 0 {
+		p.broadcastLogEvent(raw, updates[0].edge.SourceEventID)
+	}
 }
 
 func (p *Pipeline) broadcastGraphUpdate(n *types.Node, e *types.Edge) {
@@ -140,6 +143,20 @@ func (p *Pipeline) broadcastScore(edgeID string, score float64) {
 	})
 	if err != nil {
 		p.cfg.Logger.Warn("encode score_update", "err", err)
+		return
+	}
+	p.cfg.Broadcaster.Send(msg)
+}
+
+func (p *Pipeline) broadcastLogEvent(raw splunk.RawEvent, eventID string) {
+	msg, err := types.NewMessage(types.MsgTypeLogEvent, types.LogEventPayload{
+		EventID: eventID,
+		TS:      raw.TS.Unix(),
+		Source:  string(raw.Kind),
+		Raw:     raw.Raw,
+	})
+	if err != nil {
+		p.cfg.Logger.Warn("encode log_event", "err", err)
 		return
 	}
 	p.cfg.Broadcaster.Send(msg)
