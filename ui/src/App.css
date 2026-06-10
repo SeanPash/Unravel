@@ -235,6 +235,14 @@
   white-space: nowrap;
 }
 
+/* Slider + event ticks share a relative track so ticks align to its width */
+.scrubber-track {
+  position: relative;
+  flex: 1;
+  display: flex;
+  align-items: center;
+}
+
 .scrubber-slider {
   flex: 1;
   accent-color: var(--accent-green);
@@ -244,6 +252,64 @@
 .scrubber-slider:disabled {
   opacity: 0.4;
   cursor: default;
+}
+
+/* Event tick overlay; clicks pass through to the slider thumb beneath */
+.scrubber-ticks {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  height: 10px;
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+
+.scrubber-tick {
+  position: absolute;
+  top: 0;
+  width: 2px;
+  height: 10px;
+  margin-left: -1px;
+  background: var(--text-faint);
+  border-radius: var(--radius);
+  opacity: 0.5;
+}
+
+.scrubber-tick.reached {
+  opacity: 1;
+}
+
+.scrubber-controls {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  flex-shrink: 0;
+}
+
+.scrubber-btn {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px var(--space-2);
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--bg-elevated);
+  color: var(--text-muted);
+  font-family: var(--font-sans);
+  cursor: pointer;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.scrubber-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.scrubber-btn[aria-pressed='true'] {
+  background: rgba(83, 160, 81, 0.15);
+  color: var(--accent-green);
+  border-color: var(--accent-green);
 }
 
 .scrubber-live-btn {

@@ -63,10 +63,12 @@ export function degreeToSize(degree: number): number {
 
 export type LabelClass = 'labels-off' | 'labels-faint' | 'labels-on'
 
-// Maps the current zoom level to a label visibility band.
+// Maps the current zoom level to a label visibility band. Tuned so labels
+// are readable at the default fit zoom (~0.7-1.1) and fade out only when the
+// graph is zoomed far out.
 export function zoomToLabelClass(zoom: number): LabelClass {
-  if (zoom < 0.7) return 'labels-off'
-  if (zoom < 1.2) return 'labels-faint'
+  if (zoom < 0.5) return 'labels-off'
+  if (zoom < 0.9) return 'labels-faint'
   return 'labels-on'
 }
 
@@ -113,29 +115,39 @@ const CY_STYLE: cytoscape.StylesheetJson = [
   {
     selector: 'edge',
     style: {
-      'width': 1.5,
+      'width': 1.0,
       'line-color': (ele: cytoscape.EdgeSingular) => scoreToColor((ele.data('confidence') as number) ?? 0.5),
       'target-arrow-color': (ele: cytoscape.EdgeSingular) => scoreToColor((ele.data('confidence') as number) ?? 0.5),
       'target-arrow-shape': 'triangle',
-      'arrow-scale': 0.8,
+      'arrow-scale': 0.6,
       'curve-style': 'bezier',
       'label': 'data(kind)',
       'font-size': 9,
       'color': '#8c9bab',
       'text-rotation': 'autorotate',
+      // Lift the label off the edge so it rides just above the arrow shaft
+      // instead of being bisected by it (nodes use the same trick, +5 below).
+      'text-margin-y': -7,
+      // A small dark plate keeps the label legible where edges cross under it.
+      // The hex is the literal value of --bg-page; Cytoscape's canvas
+      // stylesheet cannot resolve CSS custom properties.
+      'text-background-color': '#0b0c0e',
+      'text-background-opacity': 0.7,
+      'text-background-padding': '2px',
+      'text-background-shape': 'roundrectangle',
       'text-opacity': 0,
       'transition-property': 'opacity, text-opacity',
       'transition-duration': 150,
     },
   },
-  { selector: '.labels-faint', style: { 'text-opacity': 0.45 } },
+  { selector: '.labels-faint', style: { 'text-opacity': 0.7 } },
   { selector: '.labels-on', style: { 'text-opacity': 1 } },
   {
     selector: 'edge.chain',
     style: {
       'line-color': '#dc4e41',
       'target-arrow-color': '#dc4e41',
-      'width': 4,
+      'width': 2.5,
     },
   },
   // Focused node selection ring; focus state is owned by App.
@@ -151,7 +163,8 @@ const CY_STYLE: cytoscape.StylesheetJson = [
   // Hovered neighborhood always shows its labels.
   { selector: 'node.hl', style: { 'text-opacity': 1 } },
   // Hover fade for everything outside the neighborhood. Last so it wins.
-  { selector: '.dim', style: { 'opacity': 0.12, 'text-opacity': 0 } },
+  // Also hide the label plate so dimmed edges don't show an empty chip.
+  { selector: '.dim', style: { 'opacity': 0.12, 'text-opacity': 0, 'text-background-opacity': 0 } },
   { selector: '.ts-hidden', style: { 'display': 'none' } },
 ]
 

@@ -130,19 +130,20 @@ describe('degreeToSize', () => {
 // ---- zoomToLabelClass ----
 
 describe('zoomToLabelClass', () => {
-  it('hides labels when zoomed far out', () => {
+  it('hides labels only when zoomed far out', () => {
     expect(zoomToLabelClass(0.3)).toBe('labels-off')
-    expect(zoomToLabelClass(0.69)).toBe('labels-off')
+    expect(zoomToLabelClass(0.49)).toBe('labels-off')
   })
 
-  it('shows faint labels at mid zoom', () => {
+  it('shows faint labels at low-mid zoom', () => {
+    expect(zoomToLabelClass(0.5)).toBe('labels-faint')
     expect(zoomToLabelClass(0.7)).toBe('labels-faint')
-    expect(zoomToLabelClass(1.0)).toBe('labels-faint')
-    expect(zoomToLabelClass(1.19)).toBe('labels-faint')
+    expect(zoomToLabelClass(0.89)).toBe('labels-faint')
   })
 
-  it('shows full labels when zoomed in', () => {
-    expect(zoomToLabelClass(1.2)).toBe('labels-on')
+  it('shows full labels at default zoom and in', () => {
+    expect(zoomToLabelClass(0.9)).toBe('labels-on')
+    expect(zoomToLabelClass(1.1)).toBe('labels-on')
     expect(zoomToLabelClass(3)).toBe('labels-on')
   })
 })

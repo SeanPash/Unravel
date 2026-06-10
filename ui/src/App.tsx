@@ -142,6 +142,7 @@ export default function App() {
                   minTs={minTs}
                   maxTs={maxTs}
                   window={state.timeWindow}
+                  edges={edges}
                   onChange={(w) => dispatch({ type: 'set_time_window', payload: w })}
                 />
               )}
