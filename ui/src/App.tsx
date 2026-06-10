@@ -1,14 +1,16 @@
 import { useEffect, useReducer, useRef } from 'react'
 import { EngineSocket } from './ws'
-import type { GraphUpdatePayload, ScoreUpdatePayload, ChainResultPayload, NarrationPayload, WsNode, WsEdge } from './ws'
+import type { GraphUpdatePayload, ScoreUpdatePayload, ChainResultPayload, NarrationPayload, WsNode, WsEdge, LogEventPayload } from './ws'
 import { GraphView } from './GraphView'
 import { NarrationPanel } from './NarrationPanel'
 import { TimeScrubber } from './TimeScrubber'
+import { LogsPanel } from './LogsPanel'
+import { selectRelatedLogs } from './logFilter'
 import './App.css'
 
 const WS_URL = (import.meta.env.VITE_WS_URL as string | undefined) ?? `ws://${window.location.host}/ws`
 
-interface AppState {
+export interface AppState {
   nodes: Record<string, WsNode>
   edges: Record<string, WsEdge>
   chain: ChainResultPayload | null
@@ -16,9 +18,11 @@ interface AppState {
   status: 'connecting' | 'live' | 'reconnecting'
   awaitingNarration: boolean
   timeWindow: [number, number] | null
+  logs: Record<string, LogEventPayload>
+  focusedNodeId: string | null
 }
 
-type Action =
+export type Action =
   | { type: 'graph_update'; payload: GraphUpdatePayload }
   | { type: 'score_update'; payload: ScoreUpdatePayload }
   | { type: 'chain_result'; payload: ChainResultPayload }
@@ -26,8 +30,10 @@ type Action =
   | { type: 'connected' }
   | { type: 'disconnected' }
   | { type: 'set_time_window'; payload: [number, number] | null }
+  | { type: 'log_event'; payload: LogEventPayload }
+  | { type: 'focus_node'; payload: string | null }
 
-const initialState: AppState = {
+export const initialState: AppState = {
   nodes: {},
   edges: {},
   chain: null,
@@ -35,9 +41,11 @@ const initialState: AppState = {
   status: 'connecting',
   awaitingNarration: false,
   timeWindow: null,
+  logs: {},
+  focusedNodeId: null,
 }
 
-function reducer(state: AppState, action: Action): AppState {
+export function reducer(state: AppState, action: Action): AppState {
   switch (action.type) {
     case 'graph_update': {
       const nodes = { ...state.nodes }
@@ -67,6 +75,10 @@ function reducer(state: AppState, action: Action): AppState {
       return { ...state, status: 'reconnecting' }
     case 'set_time_window':
       return { ...state, timeWindow: action.payload }
+    case 'log_event':
+      return { ...state, logs: { ...state.logs, [action.payload.event_id]: action.payload } }
+    case 'focus_node':
+      return { ...state, focusedNodeId: action.payload }
   }
 }
 
@@ -80,6 +92,7 @@ export default function App() {
       onScoreUpdate: (p) => dispatch({ type: 'score_update', payload: p }),
       onChainResult: (p) => dispatch({ type: 'chain_result', payload: p }),
       onNarration: (p) => dispatch({ type: 'narration', payload: p }),
+      onLogEvent: (p) => dispatch({ type: 'log_event', payload: p }),
       onOpen: () => dispatch({ type: 'connected' }),
       onClose: () => dispatch({ type: 'disconnected' }),
     })
@@ -95,6 +108,11 @@ export default function App() {
   const minTs = edgeTimestamps.length > 0 ? Math.min(...edgeTimestamps) : 0
   const maxTs = edgeTimestamps.length > 0 ? Math.max(...edgeTimestamps) : 0
 
+  const relatedLogs = selectRelatedLogs(state.logs, edges, state.chain, state.focusedNodeId)
+  const focusedLabel = state.focusedNodeId !== null
+    ? state.nodes[state.focusedNodeId]?.label ?? state.focusedNodeId
+    : null
+
   return (
     <div className="app">
       <header className="app-bar">
@@ -107,31 +125,41 @@ export default function App() {
         <StatusBadge status={state.status} />
       </header>
       <main className="app-main">
-        <section className="dash-panel graph-pane">
-          <div className="dash-panel-title">Provenance Graph</div>
-          <div className="dash-panel-body">
-            <GraphView
-              nodes={nodes}
-              edges={edges}
-              chain={state.chain}
-              timeWindow={state.timeWindow}
-            />
-            {edges.length > 0 && (
-              <TimeScrubber
-                minTs={minTs}
-                maxTs={maxTs}
-                window={state.timeWindow}
-                onChange={(w) => dispatch({ type: 'set_time_window', payload: w })}
+        <div className="app-main-row">
+          <section className="dash-panel graph-pane">
+            <div className="dash-panel-title">Provenance Graph</div>
+            <div className="dash-panel-body">
+              <GraphView
+                nodes={nodes}
+                edges={edges}
+                chain={state.chain}
+                timeWindow={state.timeWindow}
+                focusedNodeId={state.focusedNodeId}
+                onNodeFocus={(id) => dispatch({ type: 'focus_node', payload: id })}
               />
-            )}
-          </div>
-        </section>
-        <aside className="dash-panel narration-pane">
-          <div className="dash-panel-title">AI Narration</div>
-          <div className="dash-panel-body narration-pane-body">
-            <NarrationPanel narration={state.narration} awaitingNarration={state.awaitingNarration} />
-          </div>
-        </aside>
+              {edges.length > 0 && (
+                <TimeScrubber
+                  minTs={minTs}
+                  maxTs={maxTs}
+                  window={state.timeWindow}
+                  onChange={(w) => dispatch({ type: 'set_time_window', payload: w })}
+                />
+              )}
+            </div>
+          </section>
+          <aside className="dash-panel narration-pane">
+            <div className="dash-panel-title">AI Narration</div>
+            <div className="dash-panel-body narration-pane-body">
+              <NarrationPanel narration={state.narration} awaitingNarration={state.awaitingNarration} />
+            </div>
+          </aside>
+        </div>
+        <LogsPanel
+          logs={relatedLogs}
+          focusedLabel={focusedLabel}
+          hasChain={state.chain !== null}
+          onClearFocus={() => dispatch({ type: 'focus_node', payload: null })}
+        />
       </main>
     </div>
   )
