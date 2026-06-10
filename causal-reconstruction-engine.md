@@ -68,21 +68,21 @@ React + Cytoscape.js UI
    - Structural lift: chains crossing host boundaries or touching sensitive nodes (DC, lsass) get a multiplier.
    Updates incrementally as new edges arrive.
 6. **Chain extractor.** When a connected subgraph crosses the suspicion threshold, runs a weighted backward walk from the highest-scored node to recover the maximally suspicious causal path. Output is an ordered list of events with per-step confidence.
-7. **AI narrator.** Sends the extracted chain (structured JSON) to Claude with a fixed system prompt and a cached engine-output schema preamble. Returns plain-English narration, missing-evidence hypotheses, and a ranked list of containment actions.
+7. **AI narrator.** Sends the extracted chain (structured JSON) to Claude with a fixed system prompt and a cached engine-output schema preamble. Before narrating, it can issue agentic tool calls (up to 3 rounds) to enrich the chain - `lookup_process_reputation`, `get_account_logon_history`, `fetch_raw_events` - each of which builds an SPL query and runs it through a Splunk searcher. Returns plain-English narration, missing-evidence hypotheses, and a ranked list of containment actions.
 
 ### The AI Seam
 
-The LLM is the last hop only. Structured engine output goes in; structured natural-language output comes out. Nothing in ingest, graph construction, scoring, or chain extraction touches an LLM. The engine ships with an AI-off mode that proves it: the pipeline runs end-to-end and produces a reconstructed chain without any narration call.
+The LLM is the last hop only. Structured engine output goes in; structured natural-language output comes out. The narrator may issue Splunk tool calls to gather more context for itself, but that is still inside the seam: it is the narrator enriching its own input, not the engine calling an LLM. Nothing in ingest, graph construction, scoring, or chain extraction touches an LLM. The engine ships with an AI-off mode that proves it: the pipeline runs end-to-end and produces a reconstructed chain without any narration call.
 
 ## Tech Stack
 
 | Layer | Choice | Reason |
 |---|---|---|
-| Engine language | Go 1.22+ | Strong concurrency for streaming, static binary, readable to judges, no GIL. |
+| Engine language | Go 1.25+ | Strong concurrency for streaming, static binary, readable to judges, no GIL. |
 | Graph store | Custom in-memory adjacency, periodic snapshot to BadgerDB | The graph engine is the project. Judges read our data structures, not Neo4j calls. |
 | Splunk ingest | REST `services/search/jobs/export` (tail mode) | Splunk-native, no Kafka, demonstrates platform fluency. |
 | Splunk write-back | HEC | Engine findings flow back to Splunk as notable events. |
-| WebSocket library | `github.com/coder/websocket` | Standard-library-shaped, no heavy dependency. |
+| WebSocket library | `github.com/gorilla/websocket` | Mature, widely used, simple upgrade/read/write API. |
 | UI framework | React 18 + Vite + TypeScript | Fast iteration, strong type safety, easy to test. |
 | Graph visualisation | Cytoscape.js | Mature, animates well, fits the 3-minute demo. |
 | AI model | Claude Sonnet 4.6 with prompt caching | Cost/latency profile suits ~3 call-sites per investigation; static schema preamble cached. |
@@ -105,37 +105,34 @@ The LLM is the last hop only. Structured engine output goes in; structured natur
 
 Phase 1 exists to prove the architecture end-to-end with a single vertical slice. Each axis above can be extended independently in later phases.
 
-## Repository Layout (planned)
+## Repository Layout
 
 ```
 .
-├── README.md                         hackathon rules and submission requirements
-├── ARCHITECTURE.md                   architecture diagram (README requirement)
+├── README.md                         project readme + quickstarts
+├── architecture.svg                  architecture diagram (README requirement)
 ├── causal-reconstruction-engine.md   this file
-├── security-track.md                 product framing and locked design decisions
-├── 2026-06-04-causal-reconstruction-engine-phase-1.md   implementation plan
+├── LICENSE                           MIT
+├── spec/                             canonical implementation specs (luigi-engine, sean-ui-lab)
+├── docs/superpowers/                 feature design docs + execution plans
 │
 ├── engine/                           Go module
-│   ├── cmd/engine/                   binary entry point
+│   ├── cmd/engine/                   binary entry point, flag parsing, mode dispatch
 │   ├── internal/
-│   │   ├── types/                    shared data types (events, graph)
-│   │   ├── schema/                   per-source event parsers
-│   │   ├── graph/                    incremental graph builder
+│   │   ├── types/                    shared data types (events, nodes, edges, WS envelope)
+│   │   ├── schema/                   per-source event parsers (sysmon, winsec, adaudit)
+│   │   ├── graph/                    incremental adjacency, temporal index, BadgerDB persist
 │   │   ├── scorer/                   suspicion scoring
 │   │   ├── chain/                    backward-walk chain extractor
-│   │   ├── splunk/                   Source interface and clients (Mock + REST)
-│   │   ├── ai/                       Narrator interface and Claude client
-│   │   ├── api/                      HTTP + WebSocket server
+│   │   ├── splunk/                   Source + Searcher interfaces (Mock + REST), HEC client
+│   │   ├── ai/                       Narrator interface, Claude client, tool-use, stub
+│   │   ├── api/                      HTTP + WebSocket server, broadcaster, embedded static FS
 │   │   └── pipeline/                 wires the above into the streaming loop
-│   ├── docs/adr/                     architecture decision records
-│   ├── testdata/                     canned event timelines for replay
+│   ├── testdata/                     canned event timelines + enrichment fixtures for replay
 │   └── e2e_test.go                   end-to-end smoke test
 │
 ├── ui/                               React + Vite + TypeScript app
-│   └── src/
-│       ├── GraphView.tsx             Cytoscape wrapper
-│       ├── ws.ts                     WebSocket client
-│       └── App.tsx                   top-level layout
+│   └── src/                          App, GraphView, NarrationPanel, LogsPanel, TimeScrubber, ws
 │
 └── lab/                              GOAD topology + Splunk forwarders + attack runner
 ```
