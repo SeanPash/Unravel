@@ -1,12 +1,46 @@
+/* Splunk Enterprise dark-theme design tokens. All component CSS consumes
+   these; no hardcoded colors outside this block (graph canvas colors live
+   in GraphView.tsx because Cytoscape cannot read CSS custom properties). */
+:root {
+  --bg-page: #0b0c0e;
+  --bg-panel: #171d21;
+  --bg-elevated: #1f262b;
+  --bg-appbar: #000000;
+
+  --border: #2b3033;
+  --border-subtle: #232930;
+
+  --text-primary: #e1e6eb;
+  --text-muted: #8c9bab;
+  --text-faint: #5c6773;
+
+  --accent-green: #53a051;
+  --accent-blue: #006d9c;
+  --accent-blue-bright: #4fa7d9;
+  --accent-amber: #f8be34;
+  --accent-red: #dc4e41;
+
+  --font-sans: "Splunk Platform Sans", "Proxima Nova", -apple-system,
+               "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+
+  --radius: 3px;
+  --shadow-panel: 0 1px 2px rgba(0, 0, 0, 0.4);
+}
+
 *, *::before, *::after {
   box-sizing: border-box;
 }
 
 body {
   margin: 0;
-  background: #0d1117;
-  color: #c9d1d9;
-  font-family: system-ui, 'Segoe UI', Roboto, sans-serif;
+  background: var(--bg-page);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
   font-size: 14px;
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;

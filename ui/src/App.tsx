@@ -97,29 +97,40 @@ export default function App() {
 
   return (
     <div className="app">
-      <header className="app-header">
-        <span className="app-title">Causal Reconstruction Engine</span>
+      <header className="app-bar">
+        <div className="app-bar-brand">
+          <span className="app-bar-logo">
+            splunk<span className="app-bar-logo-caret">&gt;</span>
+          </span>
+          <span className="app-title">Causal Reconstruction Engine</span>
+        </div>
         <StatusBadge status={state.status} />
       </header>
       <main className="app-main">
-        <section className="graph-pane">
-          <GraphView
-            nodes={nodes}
-            edges={edges}
-            chain={state.chain}
-            timeWindow={state.timeWindow}
-          />
-          {edges.length > 0 && (
-            <TimeScrubber
-              minTs={minTs}
-              maxTs={maxTs}
-              window={state.timeWindow}
-              onChange={(w) => dispatch({ type: 'set_time_window', payload: w })}
+        <section className="dash-panel graph-pane">
+          <div className="dash-panel-title">Provenance Graph</div>
+          <div className="dash-panel-body">
+            <GraphView
+              nodes={nodes}
+              edges={edges}
+              chain={state.chain}
+              timeWindow={state.timeWindow}
             />
-          )}
+            {edges.length > 0 && (
+              <TimeScrubber
+                minTs={minTs}
+                maxTs={maxTs}
+                window={state.timeWindow}
+                onChange={(w) => dispatch({ type: 'set_time_window', payload: w })}
+              />
+            )}
+          </div>
         </section>
-        <aside className="narration-pane">
-          <NarrationPanel narration={state.narration} awaitingNarration={state.awaitingNarration} />
+        <aside className="dash-panel narration-pane">
+          <div className="dash-panel-title">AI Narration</div>
+          <div className="dash-panel-body narration-pane-body">
+            <NarrationPanel narration={state.narration} awaitingNarration={state.awaitingNarration} />
+          </div>
         </aside>
       </main>
     </div>

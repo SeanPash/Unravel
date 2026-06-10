@@ -1,78 +1,172 @@
 import { vi, describe, it, expect, beforeEach } from 'vitest'
 import { render } from '@testing-library/react'
-import { scoreToColor, kindToShape, chainTimestamps, GraphView } from '../GraphView'
-import type { ChainResultPayload } from '../ws'
+import {
+  scoreToColor,
+  kindToColor,
+  degreeToSize,
+  zoomToLabelClass,
+  computeDegrees,
+  chainTimestamps,
+  KIND_COLORS,
+  GraphView,
+} from '../GraphView'
+import type { ChainResultPayload, WsEdge, WsNode } from '../ws'
 
 // Cytoscape requires a real canvas context that jsdom does not provide.
-// Mock the entire module so the component mounts without errors.
+// Mock the entire module so the component mounts without errors. The
+// default export carries a `use` property because GraphView registers
+// the cola extension at module scope.
 vi.mock('cytoscape', () => {
   const makeCollection = () => ({
     forEach: vi.fn(),
     animate: vi.fn(),
+    addClass: vi.fn(),
+    removeClass: vi.fn(),
     style: vi.fn(),
     length: 0,
     data: vi.fn(),
+    position: vi.fn(() => ({ x: 0, y: 0 })),
   })
 
   const mockCy = {
     add: vi.fn(() => makeCollection()),
     getElementById: vi.fn(() => ({ ...makeCollection(), length: 0 })),
     edges: vi.fn(() => makeCollection()),
+    nodes: vi.fn(() => makeCollection()),
+    elements: vi.fn(() => makeCollection()),
+    batch: vi.fn((fn: () => void) => fn()),
     on: vi.fn(),
     destroy: vi.fn(),
-    layout: vi.fn(() => ({ run: vi.fn() })),
+    zoom: vi.fn(() => 1),
+    fit: vi.fn(),
+    width: vi.fn(() => 800),
+    height: vi.fn(() => 600),
+    layout: vi.fn(() => ({ run: vi.fn(), stop: vi.fn() })),
   }
 
-  return { default: vi.fn(() => mockCy) }
+  const factory = Object.assign(
+    vi.fn(() => mockCy),
+    { use: vi.fn() },
+  )
+  return { default: factory }
 })
+
+vi.mock('cytoscape-cola', () => ({ default: vi.fn() }))
 
 // ---- scoreToColor ----
 
 describe('scoreToColor', () => {
-  it('returns a gray-toned color at score 0', () => {
-    const color = scoreToColor(0)
-    // gray: rgb(139, 148, 158)
-    expect(color).toBe('rgb(139, 148, 158)')
+  it('returns the muted slate anchor at score 0', () => {
+    // #6e7c8c
+    expect(scoreToColor(0)).toBe('rgb(110, 124, 140)')
   })
 
-  it('returns an orange-toned color at score 0.5', () => {
-    const color = scoreToColor(0.5)
-    // orange: rgb(210, 153, 34)
-    expect(color).toBe('rgb(210, 153, 34)')
+  it('returns the Splunk amber anchor at score 0.5', () => {
+    // #f8be34
+    expect(scoreToColor(0.5)).toBe('rgb(248, 190, 52)')
   })
 
-  it('returns a red-toned color at score 1', () => {
-    const color = scoreToColor(1)
-    // red: rgb(218, 54, 51)
-    expect(color).toBe('rgb(218, 54, 51)')
+  it('returns the Splunk red anchor at score 1', () => {
+    // #dc4e41
+    expect(scoreToColor(1)).toBe('rgb(220, 78, 65)')
   })
 
-  it('clamps values below 0 to gray', () => {
+  it('clamps values below 0 to the low anchor', () => {
     expect(scoreToColor(-1)).toBe(scoreToColor(0))
   })
 
-  it('clamps values above 1 to red', () => {
+  it('clamps values above 1 to the high anchor', () => {
     expect(scoreToColor(2)).toBe(scoreToColor(1))
   })
 })
 
-// ---- kindToShape ----
+// ---- kindToColor ----
 
-describe('kindToShape', () => {
-  it('maps Process to ellipse', () => {
-    expect(kindToShape('Process')).toBe('ellipse')
+describe('kindToColor', () => {
+  it('maps every kind to its KIND_COLORS entry', () => {
+    expect(kindToColor('Process')).toBe(KIND_COLORS.Process)
+    expect(kindToColor('Host')).toBe(KIND_COLORS.Host)
+    expect(kindToColor('User')).toBe(KIND_COLORS.User)
+    expect(kindToColor('NetFlow')).toBe(KIND_COLORS.NetFlow)
   })
 
-  it('maps Host to rectangle', () => {
-    expect(kindToShape('Host')).toBe('rectangle')
+  it('assigns four distinct colors', () => {
+    const colors = new Set(Object.values(KIND_COLORS))
+    expect(colors.size).toBe(4)
   })
 
-  it('maps User to diamond', () => {
-    expect(kindToShape('User')).toBe('diamond')
+  it('falls back to a muted color for unknown kinds', () => {
+    const color = kindToColor('Mystery' as WsNode['kind'])
+    expect(color).toBeTruthy()
+    expect(Object.values(KIND_COLORS)).not.toContain(color)
+  })
+})
+
+// ---- degreeToSize ----
+
+describe('degreeToSize', () => {
+  it('returns the minimum size at degree 0', () => {
+    expect(degreeToSize(0)).toBe(14)
   })
 
-  it('maps NetFlow to triangle', () => {
-    expect(kindToShape('NetFlow')).toBe('triangle')
+  it('strictly increases with degree until the cap', () => {
+    expect(degreeToSize(1)).toBeGreaterThan(degreeToSize(0))
+    expect(degreeToSize(4)).toBeGreaterThan(degreeToSize(1))
+    expect(degreeToSize(9)).toBeGreaterThan(degreeToSize(4))
+  })
+
+  it('caps at the maximum size for highly connected nodes', () => {
+    expect(degreeToSize(100)).toBe(44)
+    expect(degreeToSize(10_000)).toBe(44)
+  })
+
+  it('never returns NaN, even for negative input', () => {
+    expect(Number.isNaN(degreeToSize(-5))).toBe(false)
+    expect(degreeToSize(-5)).toBe(14)
+  })
+})
+
+// ---- zoomToLabelClass ----
+
+describe('zoomToLabelClass', () => {
+  it('hides labels when zoomed far out', () => {
+    expect(zoomToLabelClass(0.3)).toBe('labels-off')
+    expect(zoomToLabelClass(0.69)).toBe('labels-off')
+  })
+
+  it('shows faint labels at mid zoom', () => {
+    expect(zoomToLabelClass(0.7)).toBe('labels-faint')
+    expect(zoomToLabelClass(1.0)).toBe('labels-faint')
+    expect(zoomToLabelClass(1.19)).toBe('labels-faint')
+  })
+
+  it('shows full labels when zoomed in', () => {
+    expect(zoomToLabelClass(1.2)).toBe('labels-on')
+    expect(zoomToLabelClass(3)).toBe('labels-on')
+  })
+})
+
+// ---- computeDegrees ----
+
+describe('computeDegrees', () => {
+  const edge = (id: string, src: string, dst: string): WsEdge => ({
+    id, src, dst, kind: 'spawned', ts: 1, confidence: 0.5,
+  })
+
+  it('returns an empty map for no edges', () => {
+    expect(computeDegrees([]).size).toBe(0)
+  })
+
+  it('counts both endpoints of every edge', () => {
+    const degrees = computeDegrees([edge('e1', 'a', 'b'), edge('e2', 'a', 'c')])
+    expect(degrees.get('a')).toBe(2)
+    expect(degrees.get('b')).toBe(1)
+    expect(degrees.get('c')).toBe(1)
+  })
+
+  it('counts self-loops once per endpoint role', () => {
+    const degrees = computeDegrees([edge('e1', 'a', 'a')])
+    expect(degrees.get('a')).toBe(2)
   })
 })
 
@@ -120,6 +214,15 @@ describe('GraphView', () => {
       <GraphView nodes={[]} edges={[]} chain={null} />
     )
     expect(container.querySelector('.graph-view')).toBeTruthy()
+  })
+
+  it('renders a legend with one entry per node kind', () => {
+    const { container } = render(
+      <GraphView nodes={[]} edges={[]} chain={null} />
+    )
+    const legend = container.querySelector('.graph-legend')
+    expect(legend).toBeTruthy()
+    expect(legend!.querySelectorAll('.graph-legend-item').length).toBe(4)
   })
 
   it('renders without crashing with nodes and edges', () => {
