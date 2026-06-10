@@ -12,8 +12,10 @@ export default defineConfig({
     },
   },
   build: {
-    // Output into the Go api package's embed directory
-    outDir: '../engine/internal/api/static',
+    // Build the production bundle into ui/dist/; the engine Makefile copies it
+    // into internal/api/static/ for embedding, which keeps the tracked
+    // .gitkeep/.gitignore guardians in that dir from being wiped on every build.
+    outDir: 'dist',
     emptyOutDir: true,
   },
   test: {

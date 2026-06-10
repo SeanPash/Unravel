@@ -215,10 +215,9 @@ func buildNarrator(cfg config, logger *slog.Logger) ai.Narrator {
 	return ai.NewClaude(ai.ClaudeConfig{APIKey: cfg.apiKey, Searcher: searcher})
 }
 
-// discoverTimelines returns every *.json file in dir, preferring a single
-// `chain-*.json` file at the root (the canonical replay timeline format) and
-// falling back to a wildcard glob so tests dropping a single file in a fresh
-// directory still work.
+// discoverTimelines returns every root-level chain-*.json file in dir (the
+// replay timeline format). It deliberately skips subdirectories, so non-timeline
+// fixtures parked under e.g. testdata/ws/ are never picked up as replay input.
 func discoverTimelines(dir string) ([]string, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {

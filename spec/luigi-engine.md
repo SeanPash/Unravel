@@ -220,7 +220,8 @@ Sent after the AI narrator returns.
 ## Test Strategy
 
 - Unit tests live next to the package they test (`graph/graph_test.go`, `scorer/scorer_test.go`, etc.)
-- `testdata/chain-phishing.json`: canned 5-step kill chain event sequence used by e2e and replay tests
+- `testdata/chain-phishing-events.json`: canned 5-step kill chain event sequence used by e2e and replay tests
+- `testdata/ws/chain-phishing.json`: WebSocket-message fixture (`type`/`payload`) used by the `types` package tests; kept out of the replay glob by living in a subdirectory
 - `e2e_test.go` at the module root: wires `MockSource` + `StubNarrator` through the full pipeline, connects a WebSocket client, asserts that a `chain_result` message is received with confidence > 0.8
 
 Run with: `go test ./...` from `engine/`
@@ -287,7 +288,7 @@ Run with: `go test ./...` from `engine/`
 
 ### Testdata
 
-- [ ] `testdata/chain-phishing.json`: 5-step kill chain event sequence (Sysmon + WinSec + AD)
+- [ ] `testdata/chain-phishing-events.json`: 5-step kill chain event sequence (Sysmon + WinSec + AD)
 
 ---
 
