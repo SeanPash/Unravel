@@ -35,7 +35,7 @@ VITE_WS_URL=ws://localhost:9090/ws npm run dev
 
 ## Development vs production
 
-During development, use `npm run dev` (Vite dev server with HMR). In production, the engine binary serves the built assets directly after Luigi's L1 is complete, so no separate server is needed. Build with `npm run build`, then `make release` from `engine/` copies the output into the embed directory and compiles it into the binary.
+During development, use `npm run dev` (Vite dev server with HMR). In production, the engine binary serves the built assets directly, so no separate server is needed. Build with `npm run build`, then run `make release` from `engine/` to copy the output into the embed directory and compile it into the binary.
 
 ## Mock server
 

@@ -51,9 +51,8 @@ cd engine
 
 Add `--insecure` for self-signed certs (GOAD and most lab Splunk installs). Omit it for a Splunk instance with a valid CA-signed certificate.
 
-See `spec/sean-ui-lab.md` for lab bring-up instructions (GOAD-lite 3-VM
-topology, Splunk Universal Forwarder configuration, and the Python attack
-runner).
+See `lab/` for lab bring-up instructions (GOAD-lite 3-VM topology, Splunk
+Universal Forwarder configuration, and the Python attack runner).
 
 ## Repository layout
 
@@ -62,7 +61,6 @@ runner).
 | `engine/` | Go engine binary - all 7 subcomponents, WebSocket server, operating modes |
 | `ui/` | React 18 + Cytoscape.js front end, embedded in the engine binary |
 | `lab/` | GOAD topology (Vagrant + Ansible), Splunk forwarder config, attack runner |
-| `spec/` | Per-owner task specs for engine (Luigi) and UI/lab (Sean) |
 
 ## License
 
