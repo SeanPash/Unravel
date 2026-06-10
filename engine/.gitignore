@@ -1,0 +1,2 @@
+# Compiled engine binary (build artifact from `go build` / `make release`)
+/engine
