@@ -345,7 +345,7 @@
 }
 
 .logs-clear-filter:hover {
-  border-color: #8c9bab;
+  border-color: var(--text-muted);
 }
 
 .logs-body {
@@ -354,7 +354,7 @@
 
 .logs-empty {
   padding: var(--space-4);
-  color: #8c9bab;
+  color: var(--text-muted);
   font-size: 12px;
 }
 
@@ -371,7 +371,7 @@
 }
 
 .logs-row-chain {
-  box-shadow: inset 3px 0 0 #dc4e41;
+  box-shadow: inset 3px 0 0 var(--accent-red);
 }
 
 .logs-row-summary {
@@ -392,12 +392,12 @@
 }
 
 .logs-row-ts {
-  color: #8c9bab;
+  color: var(--text-muted);
   white-space: nowrap;
 }
 
 .logs-row-source {
-  color: #4fa7d9;
+  color: var(--accent-blue-bright);
   text-transform: uppercase;
   white-space: nowrap;
 }
@@ -411,7 +411,7 @@
 .logs-row-raw {
   margin: 0;
   padding: var(--space-2) var(--space-3) var(--space-3);
-  color: #8c9bab;
+  color: var(--text-muted);
   font-size: 11px;
   overflow-x: auto;
 }
