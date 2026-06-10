@@ -11,6 +11,8 @@ export interface GraphViewProps {
   edges: WsEdge[]
   chain: ChainResultPayload | null
   timeWindow?: [number, number] | null
+  focusedNodeId?: string | null
+  onNodeFocus?: (nodeId: string | null) => void
 }
 
 // --- Pure helpers (exported for unit tests) ---
@@ -136,6 +138,14 @@ const CY_STYLE: cytoscape.StylesheetJson = [
       'width': 4,
     },
   },
+  // Focused node selection ring; focus state is owned by App.
+  {
+    selector: 'node.focused',
+    style: {
+      'border-width': 3,
+      'border-color': '#dc4e41',
+    },
+  },
   // Added elements start invisible; removing the class fades them in.
   { selector: '.entering', style: { 'opacity': 0 } },
   // Hovered neighborhood always shows its labels.
@@ -168,7 +178,7 @@ interface Tooltip {
   y: number
 }
 
-export function GraphView({ nodes, edges, chain, timeWindow }: GraphViewProps) {
+export function GraphView({ nodes, edges, chain, timeWindow, focusedNodeId, onNodeFocus }: GraphViewProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const cyRef = useRef<Core | null>(null)
   const layoutRef = useRef<cytoscape.Layouts | null>(null)
@@ -177,6 +187,8 @@ export function GraphView({ nodes, edges, chain, timeWindow }: GraphViewProps) {
   const labelBand = useRef<LabelClass>('labels-faint')
   const firstBatch = useRef(true)
   const [tooltip, setTooltip] = useState<Tooltip | null>(null)
+  const onNodeFocusRef = useRef(onNodeFocus)
+  useEffect(() => { onNodeFocusRef.current = onNodeFocus })
 
   // Mount Cytoscape once; tear it down on unmount
   useEffect(() => {
@@ -195,9 +207,13 @@ export function GraphView({ nodes, edges, chain, timeWindow }: GraphViewProps) {
     cy.on('tap', 'node', (e) => {
       const pos = e.renderedPosition
       setTooltip({ node: e.target.data() as WsNode, x: pos.x, y: pos.y })
+      onNodeFocusRef.current?.((e.target as cytoscape.NodeSingular).id())
     })
     cy.on('tap', (e) => {
-      if (e.target === cy) setTooltip(null)
+      if (e.target === cy) {
+        setTooltip(null)
+        onNodeFocusRef.current?.(null)
+      }
     })
 
     // Obsidian-style hover: keep the closed neighborhood, fade the rest
@@ -383,6 +399,17 @@ export function GraphView({ nodes, edges, chain, timeWindow }: GraphViewProps) {
       if (ts.has(e.data('ts') as number)) e.addClass('chain')
     })
   }, [chain])
+
+  // Mirror the focused node into a selection ring
+  useEffect(() => {
+    const cy = cyRef.current
+    if (!cy) return
+    cy.nodes().removeClass('focused')
+    if (focusedNodeId) {
+      const el = cy.getElementById(focusedNodeId)
+      if (el.length > 0) el.addClass('focused')
+    }
+  }, [focusedNodeId, nodes])
 
   // Show/hide edges based on time window. Hidden edges stay in the
   // simulation on purpose so node positions hold still while scrubbing.

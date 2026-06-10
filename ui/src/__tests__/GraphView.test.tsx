@@ -1,5 +1,6 @@
 import { vi, describe, it, expect, beforeEach } from 'vitest'
 import { render } from '@testing-library/react'
+import cytoscape from 'cytoscape'
 import {
   scoreToColor,
   kindToColor,
@@ -250,5 +251,27 @@ describe('GraphView', () => {
       <GraphView nodes={[]} edges={[]} chain={chain} />
     )
     expect(container.querySelector('.graph-view')).toBeTruthy()
+  })
+
+  it('reports node focus on tap and clears it on background tap', () => {
+    const onNodeFocus = vi.fn()
+    render(
+      <GraphView nodes={[]} edges={[]} chain={null} onNodeFocus={onNodeFocus} />
+    )
+
+    const mockCy = (cytoscape as unknown as () => Record<string, ReturnType<typeof vi.fn>>)()
+    const calls = mockCy.on.mock.calls
+    const nodeTap = calls.find((c: unknown[]) => c[0] === 'tap' && c[1] === 'node')![2]
+    const bgTap = calls.find((c: unknown[]) => c[0] === 'tap' && typeof c[1] === 'function')![1]
+
+    const fakeNode = {
+      id: () => 'proc-1',
+      data: () => ({ id: 'proc-1', kind: 'Process', label: 'cmd.exe', attrs: {} }),
+    }
+    nodeTap({ target: fakeNode, renderedPosition: { x: 10, y: 10 } })
+    expect(onNodeFocus).toHaveBeenCalledWith('proc-1')
+
+    bgTap({ target: mockCy })
+    expect(onNodeFocus).toHaveBeenCalledWith(null)
   })
 })
