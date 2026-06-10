@@ -15,6 +15,7 @@ export interface WsEdge {
   kind: string
   ts: number
   confidence: number
+  source_event_id?: string
 }
 
 export interface GraphUpdatePayload {
@@ -45,11 +46,19 @@ export interface NarrationPayload {
   actions: string[]
 }
 
+export interface LogEventPayload {
+  event_id: string
+  ts: number
+  source: string
+  raw: Record<string, unknown>
+}
+
 export interface MessageHandlers {
   onGraphUpdate(payload: GraphUpdatePayload): void
   onScoreUpdate(payload: ScoreUpdatePayload): void
   onChainResult(payload: ChainResultPayload): void
   onNarration(payload: NarrationPayload): void
+  onLogEvent?(payload: LogEventPayload): void
   onOpen?(): void
   onClose?(): void
 }
@@ -140,6 +149,9 @@ export class EngineSocket {
         break
       case 'narration':
         this.handlers.onNarration(payload as NarrationPayload)
+        break
+      case 'log_event':
+        this.handlers.onLogEvent?.(payload as LogEventPayload)
         break
       default:
         console.warn('[EngineSocket] unknown message type:', type)

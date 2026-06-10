@@ -6,6 +6,7 @@ import {
   type ScoreUpdatePayload,
   type ChainResultPayload,
   type NarrationPayload,
+  type LogEventPayload,
 } from '../ws'
 
 // Fake WebSocket - no DOM, no real network.
@@ -52,20 +53,24 @@ function makeHandlers(): MessageHandlers & {
   scoreUpdates: ScoreUpdatePayload[]
   chainResults: ChainResultPayload[]
   narrations: NarrationPayload[]
+  logEvents: LogEventPayload[]
 } {
   const graphUpdates: GraphUpdatePayload[] = []
   const scoreUpdates: ScoreUpdatePayload[] = []
   const chainResults: ChainResultPayload[] = []
   const narrations: NarrationPayload[] = []
+  const logEvents: LogEventPayload[] = []
   return {
     graphUpdates,
     scoreUpdates,
     chainResults,
     narrations,
+    logEvents,
     onGraphUpdate(p) { graphUpdates.push(p) },
     onScoreUpdate(p) { scoreUpdates.push(p) },
     onChainResult(p) { chainResults.push(p) },
     onNarration(p) { narrations.push(p) },
+    onLogEvent(p) { logEvents.push(p) },
   }
 }
 
@@ -146,6 +151,26 @@ describe('EngineSocket message dispatch', () => {
 
     expect(handlers.narrations).toHaveLength(1)
     expect(handlers.narrations[0]).toEqual(payload)
+
+    sock.close()
+  })
+
+  it('calls onLogEvent with the correct payload', () => {
+    const [factory, getInstances] = fakeFactory()
+    const handlers = makeHandlers()
+    const sock = new EngineSocket('ws://localhost:8080/ws', handlers, factory)
+    sock.connect()
+
+    const payload: LogEventPayload = {
+      event_id: 'evt-001',
+      ts: 1749100030,
+      source: 'sysmon',
+      raw: { EventID: '1', Image: 'C:\\Windows\\powershell.exe', host: 'WS01' },
+    }
+    getInstances()[0].send({ type: 'log_event', payload })
+
+    expect(handlers.logEvents).toHaveLength(1)
+    expect(handlers.logEvents[0]).toEqual(payload)
 
     sock.close()
   })
