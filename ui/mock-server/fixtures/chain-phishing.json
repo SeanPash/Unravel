@@ -7,8 +7,26 @@
         { "id": "proc-powershell-1", "kind": "Process", "label": "powershell.exe", "attrs": { "pid": 4880, "host": "WS01", "ts": 1749100030 } }
       ],
       "edges": [
-        { "id": "edge-001", "src": "proc-winword", "dst": "proc-powershell-1", "kind": "spawned", "ts": 1749100030, "confidence": 0.72 }
+        { "id": "edge-001", "src": "proc-winword", "dst": "proc-powershell-1", "kind": "spawned", "ts": 1749100030, "confidence": 0.72, "source_event_id": "evt-001" }
       ]
+    }
+  },
+  {
+    "type": "log_event",
+    "payload": {
+      "event_id": "evt-001",
+      "ts": 1749100030,
+      "source": "sysmon",
+      "raw": {
+        "EventID": "1",
+        "host": "WS01",
+        "Image": "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+        "ParentImage": "C:\\Program Files\\Microsoft Office\\root\\Office16\\WINWORD.EXE",
+        "CommandLine": "powershell.exe -nop -w hidden -enc JABzAD0ATgBlAHcALQBPAGIAagBlAGMAdAA=",
+        "User": "NORTHPOLE\\jdoe",
+        "UtcTime": "2025-06-05 19:07:10.000",
+        "RecordNumber": "evt-001"
+      }
     }
   },
   {
@@ -24,10 +42,80 @@
         { "id": "host-dc01", "kind": "Host", "label": "DC01", "attrs": { "ip": "192.168.56.10", "ts": 1749100090 } }
       ],
       "edges": [
-        { "id": "edge-002", "src": "proc-powershell-1", "dst": "proc-lsass", "kind": "dumped_memory_of", "ts": 1749100060, "confidence": 0.88 },
-        { "id": "edge-003", "src": "proc-powershell-1", "dst": "user-admin", "kind": "accessed_credential", "ts": 1749100075, "confidence": 0.85 },
-        { "id": "edge-004", "src": "user-admin", "dst": "host-dc01", "kind": "authenticated_as", "ts": 1749100090, "confidence": 0.93 }
+        { "id": "edge-002", "src": "proc-powershell-1", "dst": "proc-lsass", "kind": "dumped_memory_of", "ts": 1749100060, "confidence": 0.88, "source_event_id": "evt-002" },
+        { "id": "edge-003", "src": "proc-powershell-1", "dst": "user-admin", "kind": "accessed_credential", "ts": 1749100075, "confidence": 0.85, "source_event_id": "evt-003" },
+        { "id": "edge-004", "src": "user-admin", "dst": "host-dc01", "kind": "authenticated_as", "ts": 1749100090, "confidence": 0.93, "source_event_id": "evt-004" }
       ]
+    }
+  },
+  {
+    "type": "log_event",
+    "payload": {
+      "event_id": "evt-002",
+      "ts": 1749100060,
+      "source": "sysmon",
+      "raw": {
+        "EventID": "10",
+        "host": "WS01",
+        "SourceImage": "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+        "TargetImage": "C:\\Windows\\System32\\lsass.exe",
+        "GrantedAccess": "0x1010",
+        "CallTrace": "C:\\Windows\\SYSTEM32\\ntdll.dll+9d234",
+        "UtcTime": "2025-06-05 19:07:40.000",
+        "RecordNumber": "evt-002"
+      }
+    }
+  },
+  {
+    "type": "log_event",
+    "payload": {
+      "event_id": "evt-003",
+      "ts": 1749100075,
+      "source": "sysmon",
+      "raw": {
+        "EventID": "10",
+        "host": "WS01",
+        "SourceImage": "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+        "TargetUserName": "Administrator",
+        "TargetDomainName": "NORTHPOLE",
+        "GrantedAccess": "0x1fffff",
+        "UtcTime": "2025-06-05 19:07:55.000",
+        "RecordNumber": "evt-003"
+      }
+    }
+  },
+  {
+    "type": "log_event",
+    "payload": {
+      "event_id": "evt-004",
+      "ts": 1749100090,
+      "source": "winsec",
+      "raw": {
+        "EventID": "4624",
+        "host": "DC01",
+        "TargetUserName": "Administrator",
+        "TargetDomainName": "NORTHPOLE",
+        "LogonType": 3,
+        "AuthenticationPackageName": "Kerberos",
+        "IpAddress": "192.168.56.21",
+        "RecordNumber": "evt-004"
+      }
+    }
+  },
+  {
+    "type": "log_event",
+    "payload": {
+      "event_id": "evt-005",
+      "ts": 1749100120,
+      "source": "winsec",
+      "raw": {
+        "EventID": "4672",
+        "host": "DC01",
+        "TargetUserName": "Administrator",
+        "SubjectDomainName": "NORTHPOLE",
+        "PrivilegeList": "SeDebugPrivilege SeBackupPrivilege SeTcbPrivilege",
+        "RecordNumber": "evt-005"
+      }
     }
   },
   {
