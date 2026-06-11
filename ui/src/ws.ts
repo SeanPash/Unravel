@@ -39,6 +39,8 @@ export interface ChainStep {
 }
 
 export interface ChainResultPayload {
+  incident_id?: string
+  incident_label?: string
   confidence: number
   steps: ChainStep[]
   tactics?: string[]
@@ -60,6 +62,7 @@ export interface CVEMatch {
 }
 
 export interface ThreatIntelPayload {
+  incident_id?: string
   status: string
   summary: string
   techniques: ThreatIntelTechnique[]
@@ -67,6 +70,7 @@ export interface ThreatIntelPayload {
 }
 
 export interface NarrationPayload {
+  incident_id?: string
   text: string
   hypotheses: string[]
   actions: string[]

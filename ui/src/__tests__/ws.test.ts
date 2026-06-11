@@ -141,6 +141,26 @@ describe('EngineSocket message dispatch', () => {
     sock.close()
   })
 
+  it('carries incident_id and incident_label through onChainResult', () => {
+    const [factory, getInstances] = fakeFactory()
+    const handlers = makeHandlers()
+    const sock = new EngineSocket('ws://localhost:8080/ws', handlers, factory)
+    sock.connect()
+
+    const payload: ChainResultPayload = {
+      incident_id: 'inc-0',
+      incident_label: 'WS01',
+      confidence: 0.9,
+      steps: [{ event_id: 'evt-1', description: 'x', confidence: 0.9, ts: 1 }],
+    }
+    getInstances()[0].send({ type: 'chain_result', payload })
+
+    expect(handlers.chainResults[0].incident_id).toBe('inc-0')
+    expect(handlers.chainResults[0].incident_label).toBe('WS01')
+
+    sock.close()
+  })
+
   it('calls onNarration with the correct payload', () => {
     const [factory, getInstances] = fakeFactory()
     const handlers = makeHandlers()
