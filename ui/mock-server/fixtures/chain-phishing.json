@@ -123,6 +123,8 @@
   {
     "type": "chain_result",
     "payload": {
+      "incident_id": "inc-0",
+      "incident_label": "WS01",
       "confidence": 0.91,
       "steps": [
         { "event_id": "evt-001", "description": "WINWORD.EXE spawned powershell.exe on WS01", "confidence": 0.91, "ts": 1749100030, "technique_id": "T1566.001", "technique_name": "Spearphishing Attachment", "tactic": "Initial Access" },
@@ -137,6 +139,7 @@
   {
     "type": "narration",
     "payload": {
+      "incident_id": "inc-0",
       "text": "A macro-enabled Office document opened by a user on WS01 spawned PowerShell, which immediately accessed the LSASS process to dump credential material. The attacker used the extracted Kerberos ticket to authenticate to DC01 as a domain administrator, completing a pass-the-ticket lateral movement to the Domain Controller.",
       "hypotheses": [
         "Credential material may have been exfiltrated before network telemetry began capturing outbound traffic",
@@ -153,6 +156,7 @@
   {
     "type": "threat_intel",
     "payload": {
+      "incident_id": "inc-0",
       "status": "ok",
       "summary": "This chain matches credential-theft tradecraft attributed to APT29 and Wizard Spider: LSASS dumping (Mimikatz) followed by pass-the-ticket to a domain controller. Priority remediation: enable LSA Protection and Credential Guard on WS01, reset the krbtgt password twice, and force a domain admin credential reset.",
       "techniques": [
@@ -164,6 +168,66 @@
       "cve_matches": [
         { "id": "CVE-2020-1472", "summary": "Netlogon elevation of privilege (Zerologon) enabling DC takeover.", "in_kev": true, "severity": "CRITICAL" }
       ]
+    }
+  },
+  {
+    "type": "graph_update",
+    "payload": {
+      "nodes": [
+        { "id": "proc-winword-2", "kind": "Process", "label": "WINWORD.EXE", "attrs": { "pid": 3300, "host": "WS02", "ts": 1749103600 } },
+        { "id": "proc-powershell-2", "kind": "Process", "label": "powershell.exe", "attrs": { "pid": 3380, "host": "WS02", "ts": 1749103630 } },
+        { "id": "proc-rundll32-2", "kind": "Process", "label": "rundll32.exe", "attrs": { "pid": 3420, "host": "WS02", "ts": 1749103660 } }
+      ],
+      "edges": [
+        { "id": "edge-201", "src": "proc-winword-2", "dst": "proc-powershell-2", "kind": "spawned", "ts": 1749103630, "confidence": 0.7, "source_event_id": "evt-201" },
+        { "id": "edge-202", "src": "proc-powershell-2", "dst": "proc-rundll32-2", "kind": "spawned", "ts": 1749103660, "confidence": 0.83, "source_event_id": "evt-202" }
+      ]
+    }
+  },
+  {
+    "type": "log_event",
+    "payload": { "event_id": "evt-201", "ts": 1749103630, "source": "sysmon", "raw": { "EventID": "1", "host": "WS02", "Image": "powershell.exe", "ParentImage": "WINWORD.EXE", "User": "NORTHPOLE\\asmith" } }
+  },
+  {
+    "type": "log_event",
+    "payload": { "event_id": "evt-202", "ts": 1749103660, "source": "sysmon", "raw": { "EventID": "1", "host": "WS02", "Image": "rundll32.exe", "ParentImage": "powershell.exe", "User": "NORTHPOLE\\asmith" } }
+  },
+  {
+    "type": "score_update",
+    "payload": { "edge_id": "edge-202", "score": 0.86 }
+  },
+  {
+    "type": "chain_result",
+    "payload": {
+      "incident_id": "inc-1",
+      "incident_label": "WS02",
+      "confidence": 0.84,
+      "steps": [
+        { "event_id": "evt-201", "description": "WINWORD.EXE spawned powershell.exe", "confidence": 0.7, "ts": 1749103630 },
+        { "event_id": "evt-202", "description": "powershell.exe spawned rundll32.exe", "confidence": 0.83, "ts": 1749103660 }
+      ],
+      "tactics": ["Execution", "Defense Evasion"]
+    }
+  },
+  {
+    "type": "narration",
+    "payload": {
+      "incident_id": "inc-1",
+      "text": "A second intrusion on WS02: a macro-laden Office document spawned PowerShell, which launched rundll32.exe, a common signed-binary proxy-execution pattern.",
+      "hypotheses": ["The rundll32 invocation may side-load a malicious DLL not yet captured by image-load telemetry"],
+      "actions": ["Capture the rundll32 command line on WS02", "Isolate WS02 pending review"]
+    }
+  },
+  {
+    "type": "threat_intel",
+    "payload": {
+      "incident_id": "inc-1",
+      "status": "ok",
+      "summary": "WS02 chain maps to Execution and Defense Evasion via signed-binary proxy execution.",
+      "techniques": [
+        { "id": "T1218.011", "name": "Rundll32", "groups": ["APT28"], "software": ["Cobalt Strike"], "mitigations": ["Application control"] }
+      ],
+      "cve_matches": []
     }
   }
 ]
