@@ -1,0 +1,4 @@
+[
+  { "id": "CVE-2021-34527", "summary": "Windows Print Spooler RCE (PrintNightmare), used post-credential-theft for privilege escalation.", "in_kev": true, "severity": "CRITICAL" },
+  { "id": "CVE-2020-1472", "summary": "Netlogon elevation of privilege (Zerologon) enabling domain controller takeover.", "in_kev": true, "severity": "CRITICAL" }
+]

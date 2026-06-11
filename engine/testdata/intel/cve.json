@@ -1,0 +1,4 @@
+[
+  { "id": "CVE-2022-33679", "summary": "Windows Kerberos elevation of privilege vulnerability.", "in_kev": false, "severity": "HIGH" },
+  { "id": "CVE-2021-42287", "summary": "Active Directory domain services privilege escalation via Kerberos PAC.", "in_kev": false, "severity": "HIGH" }
+]
