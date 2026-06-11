@@ -18,11 +18,19 @@ function formatTs(ts: number): string {
 // Auto-advance dwell per event during playback (ms).
 const PLAY_INTERVAL_MS = 1200
 
+interface TickTooltip { ts: number; x: number; y: number }
+
 export function TimeScrubber({ minTs, maxTs, window, onChange, edges }: TimeScrubberProps) {
   const timestamps = useMemo(() => eventTimestamps(edges), [edges])
   const isLive = window === null
   const currentMax = window ? window[1] : maxTs
   const [playing, setPlaying] = useState(false)
+  const [tickTooltip, setTickTooltip] = useState<TickTooltip | null>(null)
+
+  function getEdgeKindAt(ts: number): string {
+    const found = edges.find(e => e.ts === ts)
+    return found ? found.kind : ''
+  }
 
   // Nothing to navigate if the range is a single instant or one event.
   const navDisabled = minTs === maxTs || timestamps.length < 2
@@ -70,6 +78,15 @@ export function TimeScrubber({ minTs, maxTs, window, onChange, edges }: TimeScru
 
   return (
     <div className="time-scrubber">
+      {tickTooltip && (
+        <div
+          className="scrubber-tick-tooltip"
+          style={{ left: tickTooltip.x, top: tickTooltip.y - 6, transform: 'translate(-50%, -100%)' }}
+        >
+          <span className="scrubber-tick-tooltip-ts">{formatTs(tickTooltip.ts)}</span>
+          <span className="scrubber-tick-tooltip-kind">{getEdgeKindAt(tickTooltip.ts)}</span>
+        </div>
+      )}
       <span className="scrubber-label">{formatTs(minTs)}</span>
       <div className="scrubber-track">
         <input
@@ -93,6 +110,12 @@ export function TimeScrubber({ minTs, maxTs, window, onChange, edges }: TimeScru
                   left: `${tsToPercent(ts, minTs, maxTs)}%`,
                   ...(reached ? { background: scoreToColor(maxConfidenceAt(edges, ts)) } : {}),
                 }}
+                onMouseEnter={(e) => {
+                  const r = (e.currentTarget as HTMLElement).getBoundingClientRect()
+                  setTickTooltip({ ts, x: r.left + r.width / 2, y: r.top })
+                }}
+                onMouseLeave={() => setTickTooltip(null)}
+                onClick={() => { setPlaying(false); onChange([minTs, ts]) }}
               />
             )
           })}

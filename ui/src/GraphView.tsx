@@ -34,11 +34,11 @@ function lerpColor(a: string, b: string, t: number): string {
   return `rgb(${r}, ${g}, ${bv})`
 }
 
-// Maps suspicion score 0-1 to a color: muted slate -> amber -> red
+// Maps suspicion score 0-1 to a color: muted slate -> Splunk amber. Red is
+// deliberately absent so the attack-chain highlight owns it outright.
 export function scoreToColor(score: number): string {
   const s = Math.max(0, Math.min(1, score))
-  if (s <= 0.5) return lerpColor('#6e7c8c', '#f8be34', s * 2)
-  return lerpColor('#f8be34', '#dc4e41', (s - 0.5) * 2)
+  return lerpColor('#6e7c8c', '#f8be34', s)
 }
 
 // Node kind palette. Red is reserved for the chain highlight, so no kind
@@ -54,22 +54,56 @@ export function kindToColor(kind: WsNode['kind']): string {
   return KIND_COLORS[kind] ?? '#8c9bab'
 }
 
-// Maps node degree (connectedness) to dot diameter, Obsidian-style:
-// sqrt growth so hubs stand out without dwarfing the graph.
 export function degreeToSize(degree: number): number {
   const d = Math.max(0, degree)
-  return Math.min(14 + 5 * Math.sqrt(d), 44)
+  return Math.min(16 + 6 * Math.sqrt(d), 52)
 }
 
 export type LabelClass = 'labels-off' | 'labels-faint' | 'labels-on'
 
-// Maps the current zoom level to a label visibility band. Tuned so labels
-// are readable at the default fit zoom (~0.7-1.1) and fade out only when the
-// graph is zoomed far out.
-export function zoomToLabelClass(zoom: number): LabelClass {
-  if (zoom < 0.5) return 'labels-off'
-  if (zoom < 0.9) return 'labels-faint'
+// Configurable zoom thresholds for label rendering. Below `off`, node labels
+// hide entirely except hovered, focused, and attack-path nodes. Between `off`
+// and `full`, nodes show shortened labels. At `full` and above, full labels.
+export interface LabelZoomThresholds {
+  off: number
+  full: number
+}
+
+export const LABEL_ZOOM_THRESHOLDS: LabelZoomThresholds = { off: 0.5, full: 1.0 }
+
+export function zoomToLabelClass(
+  zoom: number,
+  t: LabelZoomThresholds = LABEL_ZOOM_THRESHOLDS,
+): LabelClass {
+  if (zoom < t.off) return 'labels-off'
+  if (zoom < t.full) return 'labels-faint'
   return 'labels-on'
+}
+
+// Graph-friendly display name: DOMAIN\user reduces to user and paths reduce
+// to their basename. NORTHPOLE\Administrator -> Administrator,
+// C:\...\v1.0\powershell.exe -> powershell.exe. The raw label is never
+// rendered on the canvas; tooltips and detail panels keep it.
+export function shortenNodeLabel(label: string): string {
+  const segments = label.split(/[\\/]/)
+  return segments[segments.length - 1] || label
+}
+
+// Three-character code rendered under nodes at mid zoom so labels stay
+// outside the chain: WINWORD.EXE -> WIN, lsass.exe -> LSA,
+// Administrator -> ADM. A trailing digit run survives with leading zeros
+// dropped so host numbering stays meaningful: DC01 -> DC1.
+export function abbreviateLabel(label: string): string {
+  const base = shortenNodeLabel(label).replace(/\.[A-Za-z0-9]+$/, '')
+  const up = base.toUpperCase()
+  if (up.length <= 3) return up
+  const m = up.match(/^(.*?)(\d+)$/)
+  if (m) {
+    const digits = String(parseInt(m[2], 10))
+    const letters = m[1].slice(0, Math.max(1, 3 - digits.length))
+    return (letters + digits).slice(0, 3)
+  }
+  return up.slice(0, 3)
 }
 
 // Counts how many edges touch each node id (both endpoints).
@@ -88,88 +122,192 @@ export function chainTimestamps(chain: ChainResultPayload | null): Set<number> {
   return new Set(chain.steps.map(s => s.ts))
 }
 
+// --- Edge lengths ---
+// Edges stretch so their relationship label fits between the endpoints: the
+// cola layout is asked for a per-edge length sized to the text, capped so a
+// very long kind cannot blow the layout apart. Width math assumes the 9px
+// JetBrains Mono set in CY_STYLE.
+
+const EDGE_LABEL_FONT_PX = 9
+const EDGE_LABEL_CHAR_W = EDGE_LABEL_FONT_PX * 0.62
+// Keeps labels clear of the node bodies and the arrowhead at both ends.
+const EDGE_LABEL_CLEARANCE = 30
+// The fixed cola edgeLength this graph used before; short labels do not
+// shrink edges below it.
+const EDGE_LENGTH_MIN = 110
+const EDGE_LENGTH_MAX = 230
+// Extra room so a label still reads when the simulation compresses the edge.
+const EDGE_LENGTH_LABEL_ALLOWANCE = 26
+
+export function desiredEdgeLength(kind: string): number {
+  const textWidth = (kind.replace(/_/g, ' ').length + 1) * EDGE_LABEL_CHAR_W
+  return Math.max(
+    EDGE_LENGTH_MIN,
+    Math.min(textWidth + EDGE_LABEL_CLEARANCE + EDGE_LENGTH_LABEL_ALLOWANCE, EDGE_LENGTH_MAX),
+  )
+}
+
 // --- Cytoscape stylesheet ---
 // Everything is driven by element data and classes; no per-element style
 // bypasses anywhere, or they would override the .dim hover fade.
+//
+// Cytoscape cannot read CSS custom properties - all colors are hardcoded hex
+// matching the design tokens in index.css.
+// --bg-panel = #12171c, --bg-page = #0c0d10
 
-const CY_STYLE: cytoscape.StylesheetJson = [
+const CY_STYLE = [
+  // Base node: size and label layout. Per-kind rules below override fill.
   {
     selector: 'node',
     style: {
       'shape': 'ellipse',
-      'background-color': (ele: cytoscape.NodeSingular) => kindToColor(ele.data('kind') as WsNode['kind']),
+      'background-color': '#53a051',
+      'background-opacity': 0.92,
       'width': (ele: cytoscape.NodeSingular) => degreeToSize((ele.data('degree') as number) ?? 0),
       'height': (ele: cytoscape.NodeSingular) => degreeToSize((ele.data('degree') as number) ?? 0),
-      'border-width': 0,
-      'label': 'data(label)',
+      // Outer glow ring: same hue as fill at low opacity for depth
+      'border-width': 3,
+      'border-color': '#53a051',
+      'border-opacity': 0.22,
+      'border-style': 'solid',
+      // Label: 3-char code by default; the labels-on band swaps in the
+      // concise display name (basename only, never the raw path or
+      // DOMAIN\user). Positioned below the node with clear spacing.
+      'label': 'data(abbrev)',
       'font-size': 10,
-      'color': '#e1e6eb',
+      'font-family': '"JetBrains Mono", "Fira Code", monospace',
+      'color': '#c8d2da',
       'text-opacity': 0,
       'text-valign': 'bottom',
       'text-halign': 'center',
-      'text-margin-y': 5,
-      'transition-property': 'opacity, text-opacity',
+      'text-margin-y': 12,
+      // Outline halo instead of a rectangular plate - blends with graph
+      'text-background-opacity': 0,
+      'text-outline-color': '#12171c',
+      'text-outline-width': 2,
+      'text-outline-opacity': 0.9,
+      'transition-property': 'opacity, text-opacity, border-opacity',
       'transition-duration': 150,
+    },
+  },
+  // Per-kind radial gradients: lighter center -> darker edge for sphere look
+  {
+    selector: 'node[kind="Process"]',
+    style: {
+      'background-fill': 'radial-gradient',
+      'background-gradient-stop-colors': '#72c070 #3d8840',
+      'background-gradient-stop-positions': '28 100',
+      'border-color': '#53a051',
+    },
+  },
+  {
+    selector: 'node[kind="Host"]',
+    style: {
+      'background-fill': 'radial-gradient',
+      'background-gradient-stop-colors': '#72c2e8 #2e7faa',
+      'background-gradient-stop-positions': '28 100',
+      'border-color': '#4fa7d9',
+    },
+  },
+  {
+    selector: 'node[kind="User"]',
+    style: {
+      'background-fill': 'radial-gradient',
+      'background-gradient-stop-colors': '#ffd55e #c89010',
+      'background-gradient-stop-positions': '28 100',
+      'border-color': '#f8be34',
+    },
+  },
+  {
+    selector: 'node[kind="NetFlow"]',
+    style: {
+      'background-fill': 'radial-gradient',
+      'background-gradient-stop-colors': '#ba9af5 #7b52b0',
+      'background-gradient-stop-positions': '28 100',
+      'border-color': '#9d7cd8',
     },
   },
   {
     selector: 'edge',
     style: {
-      'width': 1.0,
+      'width': 1.5,
       'line-color': (ele: cytoscape.EdgeSingular) => scoreToColor((ele.data('confidence') as number) ?? 0.5),
       'target-arrow-color': (ele: cytoscape.EdgeSingular) => scoreToColor((ele.data('confidence') as number) ?? 0.5),
       'target-arrow-shape': 'triangle',
-      'arrow-scale': 0.6,
+      'arrow-scale': 0.65,
       'curve-style': 'bezier',
-      'label': 'data(kind)',
-      'font-size': 9,
-      'color': '#8c9bab',
+      // Relationship label, hidden by default to keep the graph scannable.
+      // Hover, pinning, or attack-chain membership reveals the full text,
+      // floated above the line with a soft halo (no box) for legibility.
+      'label': (ele: cytoscape.EdgeSingular) => ((ele.data('kind') as string) ?? '').replace(/_/g, ' '),
+      'font-size': EDGE_LABEL_FONT_PX,
+      'font-family': '"JetBrains Mono", "Fira Code", monospace',
+      'color': '#b9c6d2',
       'text-rotation': 'autorotate',
-      // Lift the label off the edge so it rides just above the arrow shaft
-      // instead of being bisected by it (nodes use the same trick, +5 below).
-      'text-margin-y': -7,
-      // A small dark plate keeps the label legible where edges cross under it.
-      // The hex is the literal value of --bg-page; Cytoscape's canvas
-      // stylesheet cannot resolve CSS custom properties.
-      'text-background-color': '#0b0c0e',
-      'text-background-opacity': 0.7,
-      'text-background-padding': '2px',
-      'text-background-shape': 'roundrectangle',
+      'text-margin-y': -8,
       'text-opacity': 0,
-      'transition-property': 'opacity, text-opacity',
+      'text-outline-color': '#0c0d10',
+      'text-outline-width': 2.5,
+      'text-outline-opacity': 0.95,
+      'transition-property': 'opacity, text-opacity, width',
       'transition-duration': 150,
     },
   },
-  { selector: '.labels-faint', style: { 'text-opacity': 0.7 } },
-  { selector: '.labels-on', style: { 'text-opacity': 1 } },
+  // Node label zoom bands: hidden far out, 3-char codes at mid zoom, concise
+  // display names up close. The raw label never renders on the canvas.
+  // Hovered and focused nodes override the hidden band via the selectors
+  // further down.
+  { selector: 'node.labels-faint', style: { 'text-opacity': 0.7 } },
+  { selector: 'node.labels-on', style: { 'text-opacity': 0.95, 'label': 'data(shortLabel)' } },
   {
     selector: 'edge.chain',
     style: {
       'line-color': '#dc4e41',
       'target-arrow-color': '#dc4e41',
       'width': 2.5,
+      // Attack-path edges always tell their story
+      'text-opacity': 0.9,
     },
   },
-  // Focused node selection ring; focus state is owned by App.
+  // Hovered or pinned edges thicken slightly and reveal their relationship
+  {
+    selector: 'edge.edge-hover, edge.label-pinned',
+    style: {
+      'width': 2.5,
+      'text-opacity': 1,
+    },
+  },
   {
     selector: 'node.focused',
     style: {
       'border-width': 3,
       'border-color': '#dc4e41',
+      'border-opacity': 1,
+      'text-opacity': 0.95,
     },
   },
-  // Added elements start invisible; removing the class fades them in.
   { selector: '.entering', style: { 'opacity': 0 } },
-  // Hovered neighborhood always shows its labels.
-  { selector: 'node.hl', style: { 'text-opacity': 1 } },
-  // Hover fade for everything outside the neighborhood. Last so it wins.
-  // Also hide the label plate so dimmed edges don't show an empty chip.
-  { selector: '.dim', style: { 'opacity': 0.12, 'text-opacity': 0, 'text-background-opacity': 0 } },
+  {
+    selector: 'node.hl',
+    style: {
+      'text-opacity': 0.95,
+      'border-opacity': 0.45,
+    },
+  },
+  {
+    selector: '.dim',
+    style: {
+      'opacity': 0.1,
+      'text-opacity': 0,
+      'text-background-opacity': 0,
+    },
+  },
   { selector: '.ts-hidden', style: { 'display': 'none' } },
-]
+] as cytoscape.StylesheetJson
 
 // Continuous force simulation, Obsidian-style: the graph keeps settling,
 // new nodes push neighbors aside, dragging a node tugs what it touches.
+// Edge length is per-edge so each arrow has room for its label.
 const COLA_OPTIONS: ColaLayoutOptions = {
   name: 'cola',
   infinite: true,
@@ -177,7 +315,7 @@ const COLA_OPTIONS: ColaLayoutOptions = {
   fit: false,
   centerGraph: false,
   nodeSpacing: 24,
-  edgeLength: 110,
+  edgeLength: (edge) => desiredEdgeLength((edge.data('kind') as string) ?? ''),
   avoidOverlap: true,
   ungrabifyWhileSimulating: false,
   randomize: false,
@@ -191,6 +329,14 @@ interface Tooltip {
   y: number
 }
 
+interface EdgeTooltip {
+  kind: string
+  confidence: number
+  color: string
+  x: number
+  y: number
+}
+
 export function GraphView({ nodes, edges, chain, timeWindow, focusedNodeId, onNodeFocus }: GraphViewProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const cyRef = useRef<Core | null>(null)
@@ -200,6 +346,7 @@ export function GraphView({ nodes, edges, chain, timeWindow, focusedNodeId, onNo
   const labelBand = useRef<LabelClass>('labels-faint')
   const firstBatch = useRef(true)
   const [tooltip, setTooltip] = useState<Tooltip | null>(null)
+  const [edgeTooltip, setEdgeTooltip] = useState<EdgeTooltip | null>(null)
   const onNodeFocusRef = useRef(onNodeFocus)
   useEffect(() => { onNodeFocusRef.current = onNodeFocus })
 
@@ -213,18 +360,32 @@ export function GraphView({ nodes, edges, chain, timeWindow, focusedNodeId, onNo
       userPanningEnabled: true,
       minZoom: 0.2,
       maxZoom: 2.5,
+      boxSelectionEnabled: false,
+      autounselectify: true,
     })
     cyRef.current = cy
     labelBand.current = zoomToLabelClass(cy.zoom())
 
+    // Tapping an edge pins its relationship: the canvas label stays revealed
+    // and a tooltip with the full kind and confidence holds position until
+    // the background or a node is tapped.
+    let pinnedEdge: cytoscape.EdgeSingular | null = null
+    const clearPinnedEdge = () => {
+      pinnedEdge?.removeClass('label-pinned')
+      pinnedEdge = null
+      setEdgeTooltip(null)
+    }
+
     cy.on('tap', 'node', (e) => {
       const pos = e.renderedPosition
       setTooltip({ node: e.target.data() as WsNode, x: pos.x, y: pos.y })
+      clearPinnedEdge()
       onNodeFocusRef.current?.((e.target as cytoscape.NodeSingular).id())
     })
     cy.on('tap', (e) => {
       if (e.target === cy) {
         setTooltip(null)
+        clearPinnedEdge()
         onNodeFocusRef.current?.(null)
       }
     })
@@ -242,6 +403,33 @@ export function GraphView({ nodes, edges, chain, timeWindow, focusedNodeId, onNo
         const els = cy.elements()
         els.removeClass('dim')
         els.removeClass('hl')
+      })
+    })
+
+    // Edge hover reveals the relationship label on the canvas itself (no
+    // cursor-chasing tooltip): the edge thickens and its plated label fades
+    // in. The pointer cursor signals that a click pins the full detail.
+    cy.on('mouseover', 'edge', (e) => {
+      if (containerRef.current) containerRef.current.style.cursor = 'pointer'
+      ;(e.target as cytoscape.EdgeSingular).addClass('edge-hover')
+    })
+    cy.on('mouseout', 'edge', (e) => {
+      if (containerRef.current) containerRef.current.style.cursor = ''
+      ;(e.target as cytoscape.EdgeSingular).removeClass('edge-hover')
+    })
+    cy.on('tap', 'edge', (e) => {
+      const edge = e.target as cytoscape.EdgeSingular
+      const conf = (edge.data('confidence') as number) ?? 0.5
+      setTooltip(null)
+      clearPinnedEdge()
+      pinnedEdge = edge
+      edge.addClass('label-pinned')
+      setEdgeTooltip({
+        kind: (edge.data('kind') as string).replace(/_/g, ' '),
+        confidence: conf,
+        color: scoreToColor(conf),
+        x: e.renderedPosition.x,
+        y: e.renderedPosition.y,
       })
     })
 
@@ -312,7 +500,15 @@ export function GraphView({ nodes, edges, chain, timeWindow, focusedNodeId, onNo
         seeded.set(n.id, pos)
         newEls.push({
           group: 'nodes',
-          data: { id: n.id, label: n.label, kind: n.kind, attrs: n.attrs, degree: 0 },
+          data: {
+            id: n.id,
+            label: n.label,
+            shortLabel: shortenNodeLabel(n.label),
+            abbrev: abbreviateLabel(n.label),
+            kind: n.kind,
+            attrs: n.attrs,
+            degree: 0,
+          },
           position: pos,
           classes: `entering ${band}`,
         })
@@ -398,7 +594,7 @@ export function GraphView({ nodes, edges, chain, timeWindow, focusedNodeId, onNo
     }
   }, [edges])
 
-  // Apply or clear chain highlighting
+  // Apply or clear chain highlighting; chain edges also reveal their labels
   useEffect(() => {
     const cy = cyRef.current
     if (!cy) return
@@ -444,9 +640,53 @@ export function GraphView({ nodes, edges, chain, timeWindow, focusedNodeId, onNo
     })
   }, [timeWindow])
 
+  function zoomBy(factor: number) {
+    const cy = cyRef.current
+    if (!cy) return
+    cy.zoom({ level: cy.zoom() * factor, renderedPosition: { x: cy.width() / 2, y: cy.height() / 2 } })
+  }
+
+  function fitAll() {
+    const cy = cyRef.current
+    if (!cy) return
+    cy.fit(cy.elements(), 30)
+    if (cy.zoom() > 1.5) { cy.zoom(1.5); cy.center(cy.elements()) }
+  }
+
+  function rotateGraph() {
+    const cy = cyRef.current
+    if (!cy) return
+    // Rotate all node positions 90° clockwise around the graph centroid.
+    // Distances between nodes are preserved so cola never tangles after rotation.
+    const bb = cy.elements().boundingBox({})
+    const cx = (bb.x1 + bb.x2) / 2
+    const cy_ = (bb.y1 + bb.y2) / 2
+    cy.batch(() => {
+      cy.nodes().forEach(node => {
+        const { x, y } = node.position()
+        const dx = x - cx
+        const dy = y - cy_
+        // 90° CW in screen coords (Y-down): x' = -dy, y' = dx
+        node.position({ x: cx - dy, y: cy_ + dx })
+      })
+    })
+    cy.fit(cy.elements(), 30)
+    if (cy.zoom() > 1.5) { cy.zoom(1.5); cy.center(cy.elements()) }
+    layoutRef.current?.stop()
+    layoutRef.current = cy.layout(COLA_OPTIONS as unknown as cytoscape.LayoutOptions)
+    layoutRef.current.run()
+  }
+
   return (
     <div className="graph-view">
       <div ref={containerRef} className="graph-canvas" />
+      <div className="graph-controls">
+        <button className="graph-ctrl-btn" title="Zoom in" onClick={() => zoomBy(1.25)}>+</button>
+        <button className="graph-ctrl-btn" title="Zoom out" onClick={() => zoomBy(0.8)}>&#8722;</button>
+        <div className="graph-ctrl-sep" />
+        <button className="graph-ctrl-btn" title="Fit to viewport" onClick={fitAll} style={{ fontSize: 10, fontWeight: 600, letterSpacing: '0.06em' }}>FIT</button>
+        <button className="graph-ctrl-btn" title="Rotate 90°" onClick={rotateGraph}>&#8635;</button>
+      </div>
       <div className="graph-legend">
         {(Object.entries(KIND_COLORS) as [WsNode['kind'], string][]).map(([kind, color]) => (
           <div key={kind} className="graph-legend-item">
@@ -468,6 +708,21 @@ export function GraphView({ nodes, edges, chain, timeWindow, focusedNodeId, onNo
               <span className="graph-tooltip-key">{k}:</span> {String(v)}
             </div>
           ))}
+        </div>
+      )}
+      {edgeTooltip && (
+        <div
+          className="graph-edge-tooltip"
+          style={{
+            left: edgeTooltip.x + 14,
+            top: edgeTooltip.y - 36,
+            borderLeftColor: edgeTooltip.color,
+          }}
+          role="tooltip"
+        >
+          <div className="graph-edge-tooltip-kind">{edgeTooltip.kind}</div>
+          <div className="graph-edge-tooltip-conf">{Math.round(edgeTooltip.confidence * 100)}% confidence</div>
+          <div className="graph-edge-tooltip-hint">click background to dismiss</div>
         </div>
       )}
     </div>
