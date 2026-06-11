@@ -425,19 +425,279 @@
   margin: 2px 1px;
 }
 
-/* ─── Time scrubber ───────────────────────────────────────────────────── */
+/* ─── Timeline ────────────────────────────────────────────────────────── */
 
-.time-scrubber {
+.timeline {
   display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  padding: var(--space-1) var(--space-3);
+  flex-direction: column;
+  flex-shrink: 0;
+  padding: var(--space-2) var(--space-3) var(--space-2);
   background: rgba(0, 0, 0, 0.3);
   border-top: 1px solid var(--border-subtle);
+}
+
+/* Phase band: one chevron segment per attack tactic, positioned on the same
+   time scale as the markers below so each chevron sits exactly over the
+   events it owns. Segments interlock via a notch on the left and an arrow
+   on the right. */
+.timeline-phases {
+  position: relative;
+  height: 24px;
+  margin-bottom: 4px;
+}
+
+.timeline-phase {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 14px;
+  border: none;
+  padding: 0 14px 0 12px;
+  cursor: pointer;
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--phase-color) 36%, #10161c),
+    color-mix(in srgb, var(--phase-color) 22%, #0c1116)
+  );
+  clip-path: polygon(
+    0 0,
+    calc(100% - 9px) 0, 100% 50%, calc(100% - 9px) 100%,
+    0 100%, 9px 50%
+  );
+  transition: filter 0.12s ease;
+  overflow: hidden;
+}
+
+.timeline-phase:first-child {
+  clip-path: polygon(0 0, calc(100% - 9px) 0, 100% 50%, calc(100% - 9px) 100%, 0 100%);
+  padding-left: 10px;
+}
+
+.timeline-phase:hover {
+  filter: brightness(1.35);
+}
+
+.timeline-phase-label {
+  font-family: var(--font-display);
+  font-size: 9px;
+  font-weight: 500;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--phase-color) 80%, #ffffff);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Event-count badge on phases owning more than one event; clicking the
+   chevron steps through them */
+.timeline-phase-count {
+  margin-left: 6px;
+  padding: 0 5px;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  line-height: 14px;
+  color: color-mix(in srgb, var(--phase-color) 85%, #ffffff);
+  background: rgba(0, 0, 0, 0.35);
+  border-radius: var(--radius);
   flex-shrink: 0;
 }
 
-.scrubber-label {
+/* Pre-chain placeholder segment: neutral, non-interactive */
+.timeline-phase-empty {
+  left: 0;
+  width: 100%;
+  --phase-color: #46535f;
+  cursor: default;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.timeline-phase-empty:hover {
+  filter: none;
+}
+
+/* Event track: markers ride above the rail on short stems */
+.timeline-track {
+  position: relative;
+  height: 44px;
+}
+
+.timeline-rail {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  height: 6px;
+  transform: translateY(-50%);
+  background: #1b232b;
+  border-radius: 3px;
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.5);
+}
+
+/* Lit portion of the rail up to the current scrub position */
+.timeline-rail-progress {
+  position: absolute;
+  left: 0;
+  top: 50%;
+  height: 6px;
+  transform: translateY(-50%);
+  background: rgba(138, 153, 168, 0.35);
+  border-radius: 3px;
+  pointer-events: none;
+  transition: width 0.15s ease;
+}
+
+/* Transparent native slider over the rail: drag-to-scrub plus keyboard
+   access. The thumb renders as an amber playhead bar. */
+.timeline-slider {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  appearance: none;
+  -webkit-appearance: none;
+  background: transparent;
+  cursor: pointer;
+  z-index: 1;
+}
+
+.timeline-slider:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+.timeline-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 4px;
+  height: 30px;
+  border-radius: 2px;
+  border: none;
+  background: var(--accent-amber);
+  box-shadow: 0 0 8px rgba(240, 180, 41, 0.5);
+}
+
+.timeline-slider::-moz-range-thumb {
+  width: 4px;
+  height: 30px;
+  border-radius: 2px;
+  border: none;
+  background: var(--accent-amber);
+  box-shadow: 0 0 8px rgba(240, 180, 41, 0.5);
+}
+
+/* Event markers: dots on stems, colored by their attack phase. Chain steps
+   (the actual extracted attack events) render larger with a halo. */
+.timeline-marker {
+  position: absolute;
+  z-index: 2;
+  width: 12px;
+  height: 12px;
+  padding: 0;
+  border-radius: 50%;
+  border: 2px solid #0c0d10;
+  background: var(--marker-color);
+  transform: translateX(-50%);
+  cursor: pointer;
+  opacity: 0.35;
+  transition: opacity 0.12s ease, box-shadow 0.12s ease, transform 0.12s ease;
+}
+
+.timeline-marker.reached {
+  opacity: 1;
+}
+
+.timeline-marker:hover {
+  opacity: 1;
+  transform: translateX(-50%) scale(1.25);
+}
+
+.timeline-marker.selected {
+  box-shadow: 0 0 0 2px var(--text-primary);
+}
+
+/* Both sizes end at the same baseline so stems and anchor dots line up. */
+.timeline-marker {
+  top: 4px;
+}
+
+.timeline-marker-chain {
+  top: 0;
+  width: 16px;
+  height: 16px;
+  box-shadow:
+    0 0 0 2px color-mix(in srgb, var(--marker-color) 45%, transparent),
+    0 0 10px color-mix(in srgb, var(--marker-color) 55%, transparent);
+}
+
+/* Stem connecting the marker down to the rail */
+.timeline-marker::before {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 100%;
+  transform: translateX(-50%);
+  width: 1px;
+  height: 6px;
+  background: color-mix(in srgb, var(--marker-color) 55%, transparent);
+}
+
+/* Anchor dot where the stem meets the rail */
+.timeline-marker::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: calc(100% + 4px);
+  transform: translateX(-50%);
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--marker-color);
+}
+
+/* Selected-event detail strip */
+.timeline-detail {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-top: 4px;
+  padding: 5px 10px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent-amber);
+  border-radius: var(--radius);
+  font-size: 12px;
+  min-width: 0;
+}
+
+.timeline-detail-ts {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.timeline-detail-phase {
+  font-family: var(--font-display);
+  font-size: 9px;
+  font-weight: 500;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--phase-color) 85%, #ffffff);
+  background: color-mix(in srgb, var(--phase-color) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--phase-color) 45%, transparent);
+  border-radius: var(--radius);
+  padding: 1px 7px;
+  white-space: nowrap;
+}
+
+/* Position of the selected event within its phase, e.g. 2/2 */
+.timeline-detail-pos {
   font-family: var(--font-mono);
   font-size: 10px;
   color: var(--text-faint);
@@ -445,69 +705,65 @@
   white-space: nowrap;
 }
 
-.scrubber-track {
-  position: relative;
+.timeline-detail-desc {
   flex: 1;
-  display: flex;
-  align-items: center;
+  min-width: 0;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-.scrubber-slider {
-  flex: 1;
-  accent-color: var(--accent-green);
+.timeline-detail-technique {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--accent-amber);
+  margin-right: 8px;
+}
+
+.timeline-detail-close {
+  font-family: var(--font-display);
+  font-size: 9px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 2px 8px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-muted);
   cursor: pointer;
-}
-
-.scrubber-slider:disabled {
-  opacity: 0.4;
-  cursor: default;
-}
-
-.scrubber-ticks {
-  position: absolute;
-  left: 0;
-  right: 0;
-  top: 50%;
-  height: 10px;
-  transform: translateY(-50%);
-  pointer-events: none;
-}
-
-.scrubber-tick {
-  position: absolute;
-  top: 0;
-  width: 2px;
-  height: 14px;
-  margin-left: -1px;
-  background: var(--text-faint);
-  border-radius: 1px;
-  opacity: 0.45;
-  pointer-events: auto;
-  cursor: pointer;
-  transition: top 0.12s ease, height 0.12s ease, opacity 0.12s ease,
-              width 0.12s ease, margin-left 0.12s ease;
-}
-
-.scrubber-tick:hover {
-  top: -4px;
-  height: 22px;
-  opacity: 1;
-  width: 3px;
-  margin-left: -1.5px;
-}
-
-.scrubber-tick.reached {
-  opacity: 0.9;
-}
-
-.scrubber-controls {
-  display: flex;
-  align-items: center;
-  gap: var(--space-1);
   flex-shrink: 0;
 }
 
-.scrubber-btn {
+.timeline-detail-close:hover {
+  color: var(--text-primary);
+  border-color: var(--text-faint);
+}
+
+/* Footer: range labels flanking the transport controls */
+.timeline-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 4px;
+}
+
+.timeline-label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.timeline-controls {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.timeline-btn {
   font-family: var(--font-display);
   font-size: 10px;
   font-weight: 500;
@@ -521,18 +777,18 @@
   text-transform: uppercase;
 }
 
-.scrubber-btn:disabled {
+.timeline-btn:disabled {
   opacity: 0.35;
   cursor: default;
 }
 
-.scrubber-btn[aria-pressed='true'] {
-  background: rgba(83, 160, 81, 0.12);
-  color: var(--accent-green);
-  border-color: rgba(83, 160, 81, 0.4);
+.timeline-btn[aria-pressed='true'] {
+  background: rgba(240, 180, 41, 0.12);
+  color: var(--accent-amber);
+  border-color: rgba(240, 180, 41, 0.4);
 }
 
-.scrubber-live-btn {
+.timeline-live-btn {
   font-family: var(--font-display);
   font-size: 10px;
   font-weight: 500;
@@ -546,14 +802,14 @@
   text-transform: uppercase;
 }
 
-.scrubber-live-btn.active {
-  background: rgba(83, 160, 81, 0.12);
-  color: var(--accent-green);
-  border-color: rgba(83, 160, 81, 0.4);
+.timeline-live-btn.active {
+  background: rgba(240, 180, 41, 0.12);
+  color: var(--accent-amber);
+  border-color: rgba(240, 180, 41, 0.4);
 }
 
-/* Tick hover tooltip */
-.scrubber-tick-tooltip {
+/* Marker hover tooltip */
+.timeline-tooltip {
   position: fixed;
   background: var(--bg-elevated);
   border: 1px solid var(--border);
@@ -569,7 +825,7 @@
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.6);
 }
 
-.scrubber-tick-tooltip-ts {
+.timeline-tooltip-ts {
   display: block;
   font-family: var(--font-mono);
   color: var(--text-faint);
@@ -577,7 +833,7 @@
   font-variant-numeric: tabular-nums;
 }
 
-.scrubber-tick-tooltip-kind {
+.timeline-tooltip-kind {
   display: block;
   font-family: var(--font-display);
   font-weight: 500;
@@ -698,18 +954,21 @@
   font-size: 11.5px;
 }
 
+/* Rows carry --row-accent: the color of the attack phase the log falls in,
+   set inline by LogsPanel. Rows outside any phase keep the blue default. */
 .logs-row {
+  --row-accent: var(--accent-blue-bright);
   border-bottom: 1px solid var(--border-subtle);
 }
 
-/* Chain-matching log rows: red left glow + subtle red tint */
+/* Chain-matching log rows: left glow + subtle tint in the phase color */
 .logs-row-chain {
-  box-shadow: inset 3px 0 0 var(--accent-red);
-  background: rgba(220, 78, 65, 0.05);
+  box-shadow: inset 3px 0 0 var(--row-accent);
+  background: color-mix(in srgb, var(--row-accent) 5%, transparent);
 }
 
 .logs-row-chain .logs-row-summary:hover {
-  background: rgba(220, 78, 65, 0.1);
+  background: color-mix(in srgb, var(--row-accent) 10%, transparent);
 }
 
 .logs-row-summary {
@@ -736,7 +995,7 @@
 }
 
 .logs-row-source {
-  color: var(--accent-blue-bright);
+  color: var(--row-accent);
   text-transform: uppercase;
   white-space: nowrap;
   font-size: 10px;

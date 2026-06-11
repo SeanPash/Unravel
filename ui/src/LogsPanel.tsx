@@ -1,12 +1,18 @@
 import { useState } from 'react'
 import type { LogEventPayload } from './ws'
 import type { RelatedLog } from './logFilter'
+import { phaseColorAt } from './timeline'
+import type { TimelinePhase } from './timeline'
 
 export interface LogsPanelProps {
   logs: RelatedLog[]
   focusedLabel: string | null
   hasChain: boolean
   onClearFocus: () => void
+  // Attack phases of the active incident; rows take their phase's color.
+  phases?: TimelinePhase[]
+  // Clicking a row also drives the timeline to the log's moment.
+  onLogSelect?: (log: LogEventPayload) => void
 }
 
 // One line of human-readable context per raw event. Field names differ per
@@ -23,7 +29,7 @@ function formatTs(ts: number): string {
   return new Date(ts * 1000).toISOString().replace('T', ' ').slice(0, 19)
 }
 
-export function LogsPanel({ logs, focusedLabel, hasChain, onClearFocus }: LogsPanelProps) {
+export function LogsPanel({ logs, focusedLabel, hasChain, onClearFocus, phases = [], onLogSelect }: LogsPanelProps) {
   const [expandedId, setExpandedId] = useState<string | null>(null)
 
   return (
@@ -47,22 +53,32 @@ export function LogsPanel({ logs, focusedLabel, hasChain, onClearFocus }: LogsPa
           </div>
         ) : (
           <ul className="logs-list">
-            {logs.map(({ log, onChain }) => (
-              <li key={log.event_id} className={`logs-row${onChain ? ' logs-row-chain' : ''}`}>
-                <button
-                  type="button"
-                  className="logs-row-summary"
-                  onClick={() => setExpandedId(expandedId === log.event_id ? null : log.event_id)}
+            {logs.map(({ log, onChain }) => {
+              const phaseColor = phaseColorAt(phases, log.ts)
+              return (
+                <li
+                  key={log.event_id}
+                  className={`logs-row${onChain ? ' logs-row-chain' : ''}`}
+                  style={phaseColor !== null ? { '--row-accent': phaseColor } as React.CSSProperties : undefined}
                 >
-                  <span className="logs-row-ts">{formatTs(log.ts)}</span>
-                  <span className="logs-row-source">{log.source}</span>
-                  <span className="logs-row-text">{summarize(log)}</span>
-                </button>
-                {expandedId === log.event_id && (
-                  <pre className="logs-row-raw">{JSON.stringify(log.raw, null, 2)}</pre>
-                )}
-              </li>
-            ))}
+                  <button
+                    type="button"
+                    className="logs-row-summary"
+                    onClick={() => {
+                      setExpandedId(expandedId === log.event_id ? null : log.event_id)
+                      onLogSelect?.(log)
+                    }}
+                  >
+                    <span className="logs-row-ts">{formatTs(log.ts)}</span>
+                    <span className="logs-row-source">{log.source}</span>
+                    <span className="logs-row-text">{summarize(log)}</span>
+                  </button>
+                  {expandedId === log.event_id && (
+                    <pre className="logs-row-raw">{JSON.stringify(log.raw, null, 2)}</pre>
+                  )}
+                </li>
+              )
+            })}
           </ul>
         )}
       </div>

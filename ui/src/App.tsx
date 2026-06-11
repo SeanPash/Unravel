@@ -7,6 +7,7 @@ import { TimeScrubber } from './TimeScrubber'
 import { DetailTabs, type DetailTab } from './DetailTabs'
 import { IncidentList } from './IncidentList'
 import { selectRelatedLogs } from './logFilter'
+import { displayRange, buildPhases } from './timeline'
 import './App.css'
 
 const WS_URL = (import.meta.env.VITE_WS_URL as string | undefined) ?? `ws://${window.location.host}/ws`
@@ -33,6 +34,12 @@ export interface AppState {
   timeWindow: [number, number] | null
   logs: Record<string, LogEventPayload>
   focusedNodeId: string | null
+  // Log filter for chain steps with no graph node to focus (e.g. a privilege
+  // grant logged on the DC). Mutually exclusive with focusedNodeId.
+  focusedEventId: string | null
+  // Request for the timeline to select the event at ts; seq increments per
+  // request so repeated jumps to the same ts still fire.
+  timelineJump: { ts: number; seq: number } | null
   activeTab: DetailTab
   incidents: Record<string, IncidentState>
   activeIncidentId: string | null
@@ -48,6 +55,8 @@ export type Action =
   | { type: 'set_time_window'; payload: [number, number] | null }
   | { type: 'log_event'; payload: LogEventPayload }
   | { type: 'focus_node'; payload: string | null }
+  | { type: 'focus_event'; payload: string | null }
+  | { type: 'jump_to_ts'; payload: number }
   | { type: 'threat_intel'; payload: ThreatIntelPayload }
   | { type: 'set_tab'; payload: DetailTab }
   | { type: 'select_incident'; payload: string }
@@ -59,6 +68,8 @@ export const initialState: AppState = {
   timeWindow: null,
   logs: {},
   focusedNodeId: null,
+  focusedEventId: null,
+  timelineJump: null,
   activeTab: 'logs',
   incidents: {},
   activeIncidentId: null,
@@ -160,7 +171,14 @@ export function reducer(state: AppState, action: Action): AppState {
     case 'log_event':
       return { ...state, logs: { ...state.logs, [action.payload.event_id]: action.payload } }
     case 'focus_node':
-      return { ...state, focusedNodeId: action.payload }
+      return { ...state, focusedNodeId: action.payload, focusedEventId: null }
+    case 'focus_event':
+      return { ...state, focusedEventId: action.payload, focusedNodeId: null }
+    case 'jump_to_ts':
+      return {
+        ...state,
+        timelineJump: { ts: action.payload, seq: (state.timelineJump?.seq ?? 0) + 1 },
+      }
     case 'set_tab':
       return { ...state, activeTab: action.payload }
   }
@@ -196,10 +214,22 @@ export default function App() {
   const minTs = edgeTimestamps.length > 0 ? Math.min(...edgeTimestamps) : 0
   const maxTs = edgeTimestamps.length > 0 ? Math.max(...edgeTimestamps) : 0
 
-  const relatedLogs = selectRelatedLogs(state.logs, edges, activeChain, state.focusedNodeId)
+  const relatedLogs = selectRelatedLogs(
+    state.logs, edges, activeChain, state.focusedNodeId, state.timeWindow, state.focusedEventId,
+  )
+  const focusedStep = state.focusedEventId !== null
+    ? activeChain?.steps.find((s) => s.event_id === state.focusedEventId) ?? null
+    : null
   const focusedLabel = state.focusedNodeId !== null
     ? state.nodes[state.focusedNodeId]?.label ?? state.focusedNodeId
-    : null
+    : focusedStep !== null
+      ? focusedStep.technique_name ?? focusedStep.description
+      : state.focusedEventId
+
+  // Same phase segmentation the timeline renders, so log rows can wear the
+  // color of the attack phase they belong to.
+  const [dispMin, dispMax] = displayRange(activeChain?.steps ?? [], minTs, maxTs)
+  const phases = buildPhases(activeChain?.steps ?? [], activeChain?.tactics, dispMin, dispMax)
 
   return (
     <div className="app">
@@ -241,7 +271,20 @@ export default function App() {
                   maxTs={maxTs}
                   window={state.timeWindow}
                   edges={edges}
+                  chain={activeChain}
+                  jump={state.timelineJump}
                   onChange={(w) => dispatch({ type: 'set_time_window', payload: w })}
+                  onEventFocus={(nodeId, eventId) => {
+                    if (nodeId !== null) {
+                      dispatch({ type: 'focus_node', payload: nodeId })
+                      dispatch({ type: 'set_tab', payload: 'logs' })
+                    } else if (eventId != null) {
+                      dispatch({ type: 'focus_event', payload: eventId })
+                      dispatch({ type: 'set_tab', payload: 'logs' })
+                    } else {
+                      dispatch({ type: 'focus_node', payload: null })
+                    }
+                  }}
                 />
               )}
             </div>
@@ -260,6 +303,8 @@ export default function App() {
           activeTab={state.activeTab}
           onTabChange={(tab) => dispatch({ type: 'set_tab', payload: tab })}
           logs={relatedLogs}
+          phases={phases}
+          onLogSelect={(log) => dispatch({ type: 'jump_to_ts', payload: log.ts })}
           focusedLabel={focusedLabel}
           hasChain={activeChain !== null}
           onClearFocus={() => dispatch({ type: 'focus_node', payload: null })}

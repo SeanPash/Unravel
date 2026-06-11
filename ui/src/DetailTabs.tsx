@@ -2,7 +2,8 @@ import { LogsPanel } from './LogsPanel'
 import { AttackPanel } from './AttackPanel'
 import { ThreatIntelPanel } from './ThreatIntelPanel'
 import type { RelatedLog } from './logFilter'
-import type { ChainResultPayload, WsEdge, ThreatIntelPayload } from './ws'
+import type { TimelinePhase } from './timeline'
+import type { ChainResultPayload, WsEdge, ThreatIntelPayload, LogEventPayload } from './ws'
 
 export type DetailTab = 'logs' | 'attack' | 'intel'
 
@@ -14,6 +15,8 @@ export interface DetailTabsProps {
   focusedLabel: string | null
   hasChain: boolean
   onClearFocus: () => void
+  phases?: TimelinePhase[]
+  onLogSelect?: (log: LogEventPayload) => void
   // ATT&CK
   chain: ChainResultPayload | null
   edges: WsEdge[]
@@ -54,6 +57,8 @@ export function DetailTabs(props: DetailTabsProps) {
             focusedLabel={props.focusedLabel}
             hasChain={props.hasChain}
             onClearFocus={props.onClearFocus}
+            phases={props.phases}
+            onLogSelect={props.onLogSelect}
           />
         )}
         {activeTab === 'attack' && (

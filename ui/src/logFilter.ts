@@ -9,13 +9,18 @@ export interface RelatedLog {
 }
 
 // Unfocused: logs backing the extracted chain's steps (the reconstruction's
-// conclusion). Focused: logs backing any edge incident to the focused node,
-// whether or not that edge made the chain. Always time-sorted ascending.
+// conclusion). Node-focused: logs backing any edge incident to the focused
+// node, whether or not that edge made the chain. Event-focused (for chain
+// steps with no graph edge): exactly that event's log. A non-null timeWindow
+// further restricts rows to logs inside it, so scrubbing and playback reveal
+// logs in step with the graph. Always time-sorted ascending.
 export function selectRelatedLogs(
   logs: Record<string, LogEventPayload>,
   edges: WsEdge[],
   chain: ChainResultPayload | null,
   focusedNodeId: string | null,
+  timeWindow: [number, number] | null = null,
+  focusedEventId: string | null = null,
 ): RelatedLog[] {
   const chainIds = new Set(chain?.steps.map(s => s.event_id) ?? [])
 
@@ -27,6 +32,8 @@ export function selectRelatedLogs(
         ids.add(e.source_event_id)
       }
     }
+  } else if (focusedEventId !== null) {
+    ids = new Set([focusedEventId])
   } else {
     ids = chainIds
   }
@@ -34,7 +41,9 @@ export function selectRelatedLogs(
   const out: RelatedLog[] = []
   for (const id of ids) {
     const log = logs[id]
-    if (log) out.push({ log, onChain: chainIds.has(id) })
+    if (!log) continue
+    if (timeWindow !== null && (log.ts < timeWindow[0] || log.ts > timeWindow[1])) continue
+    out.push({ log, onChain: chainIds.has(id) })
   }
   out.sort((a, b) => a.log.ts - b.log.ts)
   return out
