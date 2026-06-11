@@ -55,10 +55,13 @@ export function LogsPanel({ logs, focusedLabel, hasChain, onClearFocus, phases =
           <ul className="logs-list">
             {logs.map(({ log, onChain }) => {
               const phaseColor = phaseColorAt(phases, log.ts)
+              // The chain accent stripe only shows while an incident node or
+              // event is focused; the resting list stays quiet.
+              const accented = onChain && focusedLabel !== null
               return (
                 <li
                   key={log.event_id}
-                  className={`logs-row${onChain ? ' logs-row-chain' : ''}`}
+                  className={`logs-row${accented ? ' logs-row-chain' : ''}`}
                   style={phaseColor !== null ? { '--row-accent': phaseColor } as React.CSSProperties : undefined}
                 >
                   <button

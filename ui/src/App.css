@@ -267,17 +267,17 @@
   cursor: crosshair;
 }
 
-.minimap-section rect {
-  fill: rgba(44, 58, 71, 0.4);
-  stroke: #46535f;
+.minimap-section ellipse {
+  fill: rgba(44, 58, 71, 0.35);
+  stroke: rgba(70, 83, 95, 0.55);
   stroke-width: 1;
   cursor: pointer;
   transition: fill 0.12s ease, stroke 0.12s ease;
 }
 
-.minimap-section:hover rect {
-  fill: rgba(79, 167, 217, 0.22);
-  stroke: #4fa7d9;
+.minimap-section:hover ellipse {
+  fill: rgba(79, 167, 217, 0.2);
+  stroke: rgba(79, 167, 217, 0.7);
 }
 
 .minimap-section text {
@@ -290,9 +290,9 @@
   user-select: none;
 }
 
-.minimap-section-active rect {
-  fill: rgba(220, 78, 65, 0.16);
-  stroke: #dc4e41;
+.minimap-section-active ellipse {
+  fill: rgba(79, 167, 217, 0.18);
+  stroke: rgba(79, 167, 217, 0.8);
 }
 
 .minimap-section-active text {

@@ -86,7 +86,12 @@ export function Minimap({ data, onSectionClick, onJump }: MinimapProps) {
               className={`minimap-section${s.active ? ' minimap-section-active' : ''}`}
               onClick={(e) => { e.stopPropagation(); onSectionClick(s.id) }}
             >
-              <rect x={r.x} y={r.y} width={r.width} height={r.height} rx={3} />
+              <ellipse
+                cx={r.x + r.width / 2}
+                cy={r.y + r.height / 2}
+                rx={r.width / 2}
+                ry={r.height / 2}
+              />
               <text x={r.x + r.width / 2} y={r.y - 3}>{s.label}</text>
             </g>
           )

@@ -320,39 +320,41 @@ const CY_STYLE = [
     },
   },
   { selector: '.ts-hidden', style: { 'display': 'none' } },
-  // Incident sections: compound frames that auto-size to their children.
-  // Declared last so the frame label always wins over the zoom-band rules.
+  // Incident sections: soft elliptical glows that auto-size around their
+  // children. The radial fill fades to the page color so the edge melts
+  // into the background instead of drawing a hard frame. Declared last so
+  // the section label always wins over the zoom-band rules.
   {
     selector: ':parent',
     style: {
-      'shape': 'round-rectangle',
-      'corner-radius': 14,
-      'background-color': '#151e27',
-      'background-opacity': 0.34,
-      'border-width': 1.5,
-      'border-color': '#2c3a47',
-      'border-opacity': 0.9,
-      'border-style': 'solid',
-      'padding': 42,
+      'shape': 'ellipse',
+      'background-fill': 'radial-gradient',
+      'background-gradient-stop-colors': '#202c38 #0c0d10',
+      'background-gradient-stop-positions': '10 100',
+      'background-opacity': 0.55,
+      'border-width': 0,
+      'padding': 48,
       'label': 'data(label)',
       'font-size': 13,
       'font-family': '"Oswald", "Arial Narrow", sans-serif',
       'color': '#8a99a8',
       'text-valign': 'top',
       'text-halign': 'center',
-      'text-margin-y': -10,
-      'text-opacity': 0.92,
+      'text-margin-y': -8,
+      'text-opacity': 0.85,
       'text-outline-opacity': 0,
+      'transition-property': 'background-opacity',
+      'transition-duration': 250,
     },
   },
+  // Active incident: the glow shifts toward the structural blue and the
+  // label sharpens. No border; the brightness is the highlight.
   {
     selector: ':parent.section-active',
     style: {
-      'border-color': '#dc4e41',
-      'border-opacity': 1,
-      'background-color': '#1a222c',
-      'background-opacity': 0.42,
-      'color': '#dde3e9',
+      'background-gradient-stop-colors': '#1c3850 #0c0d10',
+      'background-opacity': 0.75,
+      'color': '#cfe3f2',
       'text-opacity': 1,
     },
   },
