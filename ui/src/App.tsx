@@ -10,6 +10,17 @@ import './App.css'
 
 const WS_URL = (import.meta.env.VITE_WS_URL as string | undefined) ?? `ws://${window.location.host}/ws`
 
+export interface IncidentState {
+  id: string
+  label: string
+  chain: ChainResultPayload | null
+  narration: NarrationPayload | null
+  threatIntel: ThreatIntelPayload | null
+  firstSeen: number
+  awaitingNarration: boolean
+  awaitingIntel: boolean
+}
+
 export interface AppState {
   nodes: Record<string, WsNode>
   edges: Record<string, WsEdge>
