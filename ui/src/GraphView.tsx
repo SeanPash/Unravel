@@ -1085,6 +1085,12 @@ export function GraphView({
     })
   }
 
+  // Frames only the focused incident's graph, the counterpart to fitAll.
+  function fitFocused() {
+    const id = activeIncidentIdRef.current
+    if (id) flyToSection(id)
+  }
+
   function rotateGraph() {
     const cy = cyRef.current
     if (!cy) return
@@ -1158,7 +1164,34 @@ export function GraphView({
         <button className="graph-ctrl-btn" title="Zoom in" onClick={() => zoomBy(1.25)}>+</button>
         <button className="graph-ctrl-btn" title="Zoom out" onClick={() => zoomBy(0.8)}>&#8722;</button>
         <div className="graph-ctrl-sep" />
-        <button className="graph-ctrl-btn" title="Fit to viewport" onClick={fitAll} style={{ fontSize: 10, fontWeight: 600, letterSpacing: '0.06em' }}>FIT</button>
+        <button className="graph-ctrl-btn" title="Fit all incidents" aria-label="Fit all incidents" onClick={fitAll}>
+          {/* Viewfinder holding several incidents */}
+          <svg width="15" height="15" viewBox="0 0 14 14" aria-hidden="true">
+            <path
+              d="M1 4V1h3M10 1h3v3M13 10v3h-3M4 13H1v-3"
+              fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"
+            />
+            <circle cx="4.8" cy="6" r="1.3" fill="currentColor" />
+            <circle cx="9.2" cy="4.8" r="1.3" fill="currentColor" />
+            <circle cx="7.2" cy="9.4" r="1.3" fill="currentColor" />
+          </svg>
+        </button>
+        <button
+          className="graph-ctrl-btn"
+          title="Fit focused incident"
+          aria-label="Fit focused incident"
+          onClick={fitFocused}
+          disabled={!activeIncidentId}
+        >
+          {/* Viewfinder holding the one focused (red) incident */}
+          <svg width="15" height="15" viewBox="0 0 14 14" aria-hidden="true">
+            <path
+              d="M1 4V1h3M10 1h3v3M13 10v3h-3M4 13H1v-3"
+              fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"
+            />
+            <circle cx="7" cy="7" r="2.3" fill="#dc4e41" />
+          </svg>
+        </button>
         <button className="graph-ctrl-btn" title="Rotate 90°" onClick={rotateGraph}>&#8635;</button>
         <div className="graph-ctrl-sep" />
         <button

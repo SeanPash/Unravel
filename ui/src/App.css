@@ -518,6 +518,16 @@
   box-shadow: none;
 }
 
+.graph-ctrl-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+  pointer-events: none;
+}
+
+.graph-ctrl-btn svg {
+  display: block;
+}
+
 /* Latched toggle (auto-snap): amber when engaged */
 .graph-ctrl-btn-on {
   color: var(--accent-amber);
