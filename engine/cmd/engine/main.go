@@ -18,6 +18,7 @@ import (
 	"github.com/luigifernandez/unravel/engine/internal/ai"
 	"github.com/luigifernandez/unravel/engine/internal/api"
 	"github.com/luigifernandez/unravel/engine/internal/graph"
+	"github.com/luigifernandez/unravel/engine/internal/intel"
 	"github.com/luigifernandez/unravel/engine/internal/pipeline"
 	"github.com/luigifernandez/unravel/engine/internal/scorer"
 	"github.com/luigifernandez/unravel/engine/internal/splunk"
@@ -35,6 +36,7 @@ type config struct {
 	insecure      bool
 	threshold     float64
 	apiKey        string
+	nvdKey        string
 	hecURL        string
 	hecToken      string
 	hecIndex      string
@@ -65,6 +67,7 @@ func parseFlags() config {
 	flag.BoolVar(&cfg.insecure, "insecure", false, "skip TLS verification for the Splunk endpoint")
 	flag.Float64Var(&cfg.threshold, "threshold", 0.5, "scorer trigger threshold")
 	flag.StringVar(&cfg.apiKey, "anthropic-key", os.Getenv("ANTHROPIC_API_KEY"), "Anthropic API key (omit to fall back to stub narrator)")
+	flag.StringVar(&cfg.nvdKey, "nvd-key", os.Getenv("NVD_API_KEY"), "NVD API key to lift the CVE rate limit (live mode, optional)")
 	flag.StringVar(&cfg.hecURL, "hec-url", "", "Splunk HEC base URL for chain result write-back, e.g. https://splunk:8088 (disabled when empty)")
 	flag.StringVar(&cfg.hecToken, "hec-token", "", "Splunk HEC token (required when --hec-url is set)")
 	flag.StringVar(&cfg.hecIndex, "hec-index", "", "Splunk index for HEC write-back (uses token default when empty)")
@@ -81,6 +84,7 @@ func run(cfg config, logger *slog.Logger) error {
 	defer source.Close()
 
 	narrator := buildNarrator(cfg, logger)
+	intelAgent := buildIntelAgent(cfg, logger)
 
 	g := graph.New()
 	sc := scorer.New(scorer.Config{
@@ -103,6 +107,7 @@ func run(cfg config, logger *slog.Logger) error {
 		Graph:       g,
 		Scorer:      sc,
 		Narrator:    narrator,
+		IntelAgent:  intelAgent,
 		Broadcaster: bcast,
 		HEC:         hec,
 		Logger:      logger,
@@ -213,6 +218,27 @@ func buildNarrator(cfg config, logger *slog.Logger) ai.Narrator {
 		logger.Info("narrator enrichment using mock fixtures", "testdata_dir", cfg.testdataDir)
 	}
 	return ai.NewClaude(ai.ClaudeConfig{APIKey: cfg.apiKey, Searcher: searcher})
+}
+
+// buildIntelAgent mirrors buildNarrator: ai-off or a missing API key yields the
+// deterministic snapshot-only agent (no LLM, no network), so both new tabs work
+// with zero keys. With a key, the Claude agent uses live REST sources in live
+// mode and mock fixtures otherwise.
+func buildIntelAgent(cfg config, logger *slog.Logger) ai.ThreatIntelAgent {
+	if cfg.mode == "ai-off" || cfg.apiKey == "" {
+		logger.Info("threat-intel agent using deterministic ATT&CK snapshot")
+		return ai.NewDeterministicIntel()
+	}
+	var source ai.ThreatIntelSource
+	switch cfg.mode {
+	case "live":
+		source = intel.NewRESTSource(intel.RESTConfig{NVDKey: cfg.nvdKey, Insecure: cfg.insecure})
+		logger.Info("threat-intel agent enrichment using live KEV/NVD")
+	default:
+		source = intel.NewMockSource(cfg.testdataDir)
+		logger.Info("threat-intel agent enrichment using mock fixtures", "testdata_dir", cfg.testdataDir)
+	}
+	return ai.NewClaudeIntel(ai.ClaudeIntelConfig{APIKey: cfg.apiKey, Source: source})
 }
 
 // discoverTimelines returns every root-level chain-*.json file in dir (the
