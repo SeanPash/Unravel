@@ -1,10 +1,10 @@
 import { useEffect, useReducer, useRef } from 'react'
 import { EngineSocket } from './ws'
-import type { GraphUpdatePayload, ScoreUpdatePayload, ChainResultPayload, NarrationPayload, WsNode, WsEdge, LogEventPayload } from './ws'
+import type { GraphUpdatePayload, ScoreUpdatePayload, ChainResultPayload, NarrationPayload, WsNode, WsEdge, LogEventPayload, ThreatIntelPayload } from './ws'
 import { GraphView } from './GraphView'
 import { NarrationPanel } from './NarrationPanel'
 import { TimeScrubber } from './TimeScrubber'
-import { LogsPanel } from './LogsPanel'
+import { DetailTabs, type DetailTab } from './DetailTabs'
 import { selectRelatedLogs } from './logFilter'
 import './App.css'
 
@@ -20,6 +20,9 @@ export interface AppState {
   timeWindow: [number, number] | null
   logs: Record<string, LogEventPayload>
   focusedNodeId: string | null
+  threatIntel: ThreatIntelPayload | null
+  awaitingIntel: boolean
+  activeTab: DetailTab
 }
 
 export type Action =
@@ -32,6 +35,8 @@ export type Action =
   | { type: 'set_time_window'; payload: [number, number] | null }
   | { type: 'log_event'; payload: LogEventPayload }
   | { type: 'focus_node'; payload: string | null }
+  | { type: 'threat_intel'; payload: ThreatIntelPayload }
+  | { type: 'set_tab'; payload: DetailTab }
 
 export const initialState: AppState = {
   nodes: {},
@@ -43,6 +48,9 @@ export const initialState: AppState = {
   timeWindow: null,
   logs: {},
   focusedNodeId: null,
+  threatIntel: null,
+  awaitingIntel: false,
+  activeTab: 'logs',
 }
 
 export function reducer(state: AppState, action: Action): AppState {
@@ -66,7 +74,7 @@ export function reducer(state: AppState, action: Action): AppState {
       }
     }
     case 'chain_result':
-      return { ...state, chain: action.payload, awaitingNarration: true }
+      return { ...state, chain: action.payload, awaitingNarration: true, awaitingIntel: true }
     case 'narration':
       return { ...state, narration: action.payload, awaitingNarration: false }
     case 'connected':
@@ -79,6 +87,10 @@ export function reducer(state: AppState, action: Action): AppState {
       return { ...state, logs: { ...state.logs, [action.payload.event_id]: action.payload } }
     case 'focus_node':
       return { ...state, focusedNodeId: action.payload }
+    case 'threat_intel':
+      return { ...state, threatIntel: action.payload, awaitingIntel: false }
+    case 'set_tab':
+      return { ...state, activeTab: action.payload }
   }
 }
 
@@ -93,6 +105,7 @@ export default function App() {
       onChainResult: (p) => dispatch({ type: 'chain_result', payload: p }),
       onNarration: (p) => dispatch({ type: 'narration', payload: p }),
       onLogEvent: (p) => dispatch({ type: 'log_event', payload: p }),
+      onThreatIntel: (p) => dispatch({ type: 'threat_intel', payload: p }),
       onOpen: () => dispatch({ type: 'connected' }),
       onClose: () => dispatch({ type: 'disconnected' }),
     })
@@ -155,11 +168,18 @@ export default function App() {
             </div>
           </aside>
         </div>
-        <LogsPanel
+        <DetailTabs
+          activeTab={state.activeTab}
+          onTabChange={(tab) => dispatch({ type: 'set_tab', payload: tab })}
           logs={relatedLogs}
           focusedLabel={focusedLabel}
           hasChain={state.chain !== null}
           onClearFocus={() => dispatch({ type: 'focus_node', payload: null })}
+          chain={state.chain}
+          edges={edges}
+          intel={state.threatIntel}
+          awaitingIntel={state.awaitingIntel}
+          onNodeFocus={(id) => dispatch({ type: 'focus_node', payload: id })}
         />
       </main>
     </div>

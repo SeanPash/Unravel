@@ -24,4 +24,30 @@ describe('App reducer', () => {
     s = reducer(s, { type: 'focus_node', payload: null })
     expect(s.focusedNodeId).toBeNull()
   })
+
+  it('chain_result sets awaitingIntel true', () => {
+    const s = reducer(initialState, {
+      type: 'chain_result',
+      payload: { confidence: 0.9, steps: [], tactics: [] },
+    })
+    expect(s.awaitingIntel).toBe(true)
+  })
+
+  it('threat_intel stores the payload and clears awaitingIntel', () => {
+    const mid = reducer(initialState, {
+      type: 'chain_result',
+      payload: { confidence: 0.9, steps: [], tactics: [] },
+    })
+    const s = reducer(mid, {
+      type: 'threat_intel',
+      payload: { status: 'ok', summary: 'x', techniques: [], cve_matches: [] },
+    })
+    expect(s.awaitingIntel).toBe(false)
+    expect(s.threatIntel?.summary).toBe('x')
+  })
+
+  it('set_tab changes the active tab', () => {
+    const s = reducer(initialState, { type: 'set_tab', payload: 'attack' })
+    expect(s.activeTab).toBe('attack')
+  })
 })
