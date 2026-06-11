@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { selectRelatedLogs } from '../logFilter'
+import { selectRelatedLogs, nodeForEvent } from '../logFilter'
 import type { ChainResultPayload, LogEventPayload, WsEdge } from '../ws'
 
 const log = (id: string, ts: number): LogEventPayload => ({
@@ -75,5 +75,20 @@ describe('selectRelatedLogs, node focused', () => {
   it('ignores the chain entirely while focused (off-chain node shows its own logs)', () => {
     const out = selectRelatedLogs(logs, edges, null, 'c')
     expect(out.map(r => r.log.event_id)).toEqual(['evt-2', 'evt-3'])
+  })
+})
+
+describe('nodeForEvent', () => {
+  const edges = [
+    { id: 'e1', src: 'a', dst: 'b', kind: 'spawned', ts: 1, confidence: 0.5, source_event_id: 'evt-1' },
+    { id: 'e2', src: 'b', dst: 'c', kind: 'dumped_memory_of', ts: 2, confidence: 0.9, source_event_id: 'evt-2' },
+  ]
+
+  it('returns the destination node id of the edge with that source_event_id', () => {
+    expect(nodeForEvent(edges, 'evt-2')).toBe('c')
+  })
+
+  it('returns null when no edge matches', () => {
+    expect(nodeForEvent(edges, 'evt-x')).toBeNull()
   })
 })

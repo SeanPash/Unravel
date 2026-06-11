@@ -39,3 +39,14 @@ export function selectRelatedLogs(
   out.sort((a, b) => a.log.ts - b.log.ts)
   return out
 }
+
+// nodeForEvent maps a chain step's event_id to the destination node of the edge
+// it produced, so the ATT&CK ribbon can focus the right graph node on click.
+export function nodeForEvent(edges: WsEdge[], eventId: string): string | null {
+  for (const e of edges) {
+    if (e.source_event_id === eventId) {
+      return e.dst
+    }
+  }
+  return null
+}
