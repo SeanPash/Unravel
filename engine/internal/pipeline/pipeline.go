@@ -173,12 +173,19 @@ func (p *Pipeline) broadcastLogEvent(raw splunk.RawEvent, eventID string) {
 }
 
 // consumeSignals runs the chain extractor and narrator in response to scorer
-// trigger signals. A burst of signals (one per scored edge) is coalesced into
-// a single chain extraction once the burst goes quiet, so we walk the graph
-// at its final state rather than after the first edge.
+// trigger signals. A burst of signals for the same incident is coalesced into
+// a single chain extraction once the burst goes quiet. Signals from different
+// incidents are tracked separately so concurrent incidents each produce their
+// own chain extraction.
 func (p *Pipeline) consumeSignals(ctx context.Context) {
 	sigs := p.cfg.Scorer.Signals()
-	var pending *scorer.Signal
+	pending := map[string]scorer.Signal{}
+	flush := func() {
+		for _, sig := range pending {
+			p.handleSignal(ctx, sig)
+		}
+		pending = map[string]scorer.Signal{}
+	}
 	timer := time.NewTimer(time.Hour)
 	if !timer.Stop() {
 		<-timer.C
@@ -186,15 +193,15 @@ func (p *Pipeline) consumeSignals(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
+			// Shutdown takes priority: drop any pending incidents rather than
+			// extract into an already-cancelled context.
 			return
 		case sig, ok := <-sigs:
 			if !ok {
-				if pending != nil {
-					p.handleSignal(ctx, *pending)
-				}
+				flush()
 				return
 			}
-			pending = &sig
+			pending[sig.IncidentID] = sig
 			if !timer.Stop() {
 				select {
 				case <-timer.C:
@@ -203,11 +210,7 @@ func (p *Pipeline) consumeSignals(ctx context.Context) {
 			}
 			timer.Reset(p.cfg.SignalDebounce)
 		case <-timer.C:
-			if pending != nil {
-				sig := *pending
-				pending = nil
-				p.handleSignal(ctx, sig)
-			}
+			flush()
 		}
 	}
 }
@@ -223,6 +226,8 @@ func (p *Pipeline) handleSignal(ctx context.Context, sig scorer.Signal) {
 	if len(result.Steps) == 0 {
 		return
 	}
+	result.IncidentID = sig.IncidentID
+	result.IncidentLabel = incidentLabel(p.cfg.Graph, sig.HotNode)
 	chainMsg, err := types.NewMessage(types.MsgTypeChainResult, result)
 	if err == nil {
 		p.cfg.Broadcaster.Send(chainMsg)
@@ -260,6 +265,7 @@ func (p *Pipeline) runNarration(ctx context.Context, result types.ChainResultPay
 		p.cfg.Logger.Warn("narrate", "err", err)
 		return
 	}
+	narr.IncidentID = result.IncidentID
 	if msg, err := types.NewMessage(types.MsgTypeNarration, narr); err == nil {
 		p.cfg.Broadcaster.Send(msg)
 	}
@@ -277,6 +283,7 @@ func (p *Pipeline) runIntel(ctx context.Context, result types.ChainResultPayload
 			Techniques: []types.ThreatIntelTechnique{},
 		}
 	}
+	payload.IncidentID = result.IncidentID
 	if msg, err := types.NewMessage(types.MsgTypeThreatIntel, payload); err == nil {
 		p.cfg.Broadcaster.Send(msg)
 	}
@@ -325,6 +332,19 @@ func processKey(host string, pid int) string {
 	return host + ":" + strconv.Itoa(pid)
 }
 
+// incidentLabel names an incident by its hot node's host, falling back to the
+// node label. Used as the human-readable incident_label on the chain payload.
+func incidentLabel(g *graph.Graph, nodeID string) string {
+	n := g.Node(nodeID)
+	if n == nil {
+		return ""
+	}
+	if h, ok := n.Attrs["host"].(string); ok && h != "" {
+		return h
+	}
+	return n.Label
+}
+
 // labelImage returns the trailing path component (e.g. "powershell.exe") so
 // the UI shows readable node labels instead of full Windows paths.
 func labelImage(path string) string {
@@ -335,4 +355,3 @@ func labelImage(path string) string {
 	}
 	return path
 }
-

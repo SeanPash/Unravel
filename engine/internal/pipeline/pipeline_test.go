@@ -201,6 +201,96 @@ checks:
 	}
 }
 
+// Two disjoint component bursts (WS01 and WS02) arriving inside one debounce
+// window must each produce a chain_result with its own incident_id and host
+// label, and the matching narration must carry the same id.
+func TestPipelineStampsIncidentIdsForConcurrentIncidents(t *testing.T) {
+	t.Parallel()
+	base := time.Date(2026, 6, 5, 19, 30, 0, 0, time.UTC)
+	events := []splunk.RawEvent{
+		spawnEvent(base, "WS01", 4000, "C:\\Windows\\explorer.exe", 4120, "C:\\Office\\WINWORD.EXE"),
+		spawnEvent(base.Add(2*time.Second), "WS01", 4120, "C:\\Office\\WINWORD.EXE", 4880, "C:\\Windows\\powershell.exe"),
+		spawnEvent(base.Add(4*time.Second), "WS02", 5000, "C:\\Windows\\explorer.exe", 5100, "C:\\Office\\WINWORD.EXE"),
+		spawnEvent(base.Add(6*time.Second), "WS02", 5100, "C:\\Office\\WINWORD.EXE", 5200, "C:\\Windows\\powershell.exe"),
+	}
+	src := splunk.NewMockFromEntries(events)
+	src.Start()
+
+	g := graph.New()
+	sc := scorer.New(scorer.Config{Threshold: 0.01})
+	bcast := api.NewBroadcaster()
+	defer bcast.Close()
+	sub := bcast.Subscribe()
+
+	p, err := New(Config{
+		Source:         src,
+		Graph:          g,
+		Scorer:         sc,
+		Narrator:       ai.NewStub(),
+		Broadcaster:    bcast,
+		SignalDebounce: 100 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- p.Run(ctx) }()
+
+	chainLabels := map[string]string{} // incident_id -> incident_label
+	narrationIDs := map[string]bool{}  // incident_id seen on a narration
+	deadline := time.After(3 * time.Second)
+	for len(chainLabels) < 2 || len(narrationIDs) < 2 {
+		select {
+		case msg, ok := <-sub.Out():
+			if !ok {
+				t.Fatal("subscriber closed before two incidents")
+			}
+			switch msg.Type {
+			case types.MsgTypeChainResult:
+				var cp types.ChainResultPayload
+				if err := json.Unmarshal(msg.Payload, &cp); err != nil {
+					t.Fatalf("decode chain: %v", err)
+				}
+				if cp.IncidentID == "" {
+					t.Error("chain_result missing incident_id")
+				}
+				chainLabels[cp.IncidentID] = cp.IncidentLabel
+			case types.MsgTypeNarration:
+				var n types.NarrationPayload
+				if err := json.Unmarshal(msg.Payload, &n); err != nil {
+					t.Fatalf("decode narration: %v", err)
+				}
+				if n.IncidentID != "" {
+					narrationIDs[n.IncidentID] = true
+				}
+			}
+		case <-deadline:
+			t.Fatalf("timed out; %d chains, %d narrations", len(chainLabels), len(narrationIDs))
+		}
+	}
+	cancel()
+	<-done
+
+	if len(chainLabels) != 2 {
+		t.Fatalf("distinct incident count = %d, want 2", len(chainLabels))
+	}
+	labels := map[string]bool{}
+	for _, lbl := range chainLabels {
+		labels[lbl] = true
+	}
+	if !labels["WS01"] || !labels["WS02"] {
+		t.Errorf("incident labels = %v, want WS01 and WS02", labels)
+	}
+	for id := range chainLabels {
+		if !narrationIDs[id] {
+			t.Errorf("no narration carried incident_id %q", id)
+		}
+	}
+}
+
 func TestPipelineBroadcastsLogEvents(t *testing.T) {
 	t.Parallel()
 	base := time.Date(2026, 6, 5, 19, 30, 0, 0, time.UTC)
