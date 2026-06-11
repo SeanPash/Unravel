@@ -155,19 +155,17 @@ export function rectsOverlap(a: Rect, b: Rect, pad = 0): boolean {
   return a.x1 - pad < b.x2 && a.x2 + pad > b.x1 && a.y1 - pad < b.y2 && a.y2 + pad > b.y1
 }
 
-// Translation that moves `moving` clear of every `fixed` rect: zero when it
-// is already clear, otherwise a shift to the right of the rightmost fixed
-// rect, vertically aligned with the fixed rects' center band.
-export function escapeOverlap(moving: Rect, fixed: Rect[], gap: number): { dx: number; dy: number } {
-  if (fixed.length === 0 || !fixed.some((f) => rectsOverlap(moving, f, gap))) {
-    return { dx: 0, dy: 0 }
-  }
-  const maxX = Math.max(...fixed.map((f) => f.x2))
-  const centerY = fixed.reduce((acc, f) => acc + (f.y1 + f.y2) / 2, 0) / fixed.length
-  return {
-    dx: maxX + gap - moving.x1,
-    dy: centerY - (moving.y1 + moving.y2) / 2,
-  }
+// Deterministic home for the n-th incident section: a left-to-right,
+// top-to-bottom grid in model coordinates. Chronological reading order keeps
+// any number of incidents organized without reshuffling earlier sections.
+export const SECTION_GRID_COLS = 3
+export const SECTION_SLOT_W = 1250
+export const SECTION_SLOT_H = 950
+
+export function sectionSlot(index: number): { x: number; y: number } {
+  const col = index % SECTION_GRID_COLS
+  const row = Math.floor(index / SECTION_GRID_COLS)
+  return { x: col * SECTION_SLOT_W, y: row * SECTION_SLOT_H }
 }
 
 // --- Minimap projection ---

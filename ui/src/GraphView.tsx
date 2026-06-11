@@ -3,7 +3,7 @@ import cytoscape from 'cytoscape'
 import cola from 'cytoscape-cola'
 import type { Core } from 'cytoscape'
 import type { WsNode, WsEdge, ChainResultPayload } from './ws'
-import { assignIncidents, escapeOverlap } from './incidentMap'
+import { assignIncidents, sectionSlot } from './incidentMap'
 import type { IncidentRef, IncidentAssignment } from './incidentMap'
 import { Minimap } from './Minimap'
 import type { MinimapData } from './Minimap'
@@ -320,20 +320,17 @@ const CY_STYLE = [
     },
   },
   { selector: '.ts-hidden', style: { 'display': 'none' } },
-  // Incident sections: soft elliptical glows that auto-size around their
-  // children. The radial fill fades to the page color so the edge melts
-  // into the background instead of drawing a hard frame. Declared last so
-  // the section label always wins over the zoom-band rules.
+  // Incident sections carry no paint of their own: the spatial grid, the
+  // floating label, and the focus fog (a DOM overlay) do the separating.
+  // Declared last so the section label always wins over zoom-band rules.
   {
     selector: ':parent',
     style: {
       'shape': 'ellipse',
-      'background-fill': 'radial-gradient',
-      'background-gradient-stop-colors': '#202c38 #0c0d10',
-      'background-gradient-stop-positions': '10 100',
-      'background-opacity': 0.55,
+      'background-opacity': 0,
       'border-width': 0,
       'padding': 48,
+      'events': 'no',
       'label': 'data(label)',
       'font-size': 13,
       'font-family': '"Oswald", "Arial Narrow", sans-serif',
@@ -343,19 +340,6 @@ const CY_STYLE = [
       'text-margin-y': -8,
       'text-opacity': 0.85,
       'text-outline-opacity': 0,
-      'transition-property': 'background-opacity',
-      'transition-duration': 250,
-    },
-  },
-  // Active incident: the glow shifts toward the structural blue and the
-  // label sharpens. No border; the brightness is the highlight.
-  {
-    selector: ':parent.section-active',
-    style: {
-      'background-gradient-stop-colors': '#1c3850 #0c0d10',
-      'background-opacity': 0.75,
-      'color': '#cfe3f2',
-      'text-opacity': 1,
     },
   },
   // Nodes reached by more than one incident: they sit between sections and
@@ -368,6 +352,9 @@ const CY_STYLE = [
       'border-opacity': 0.75,
     },
   },
+  // The bridge between two incidents stays hidden until a node touching it
+  // is hovered, keeping the resting map quiet.
+  { selector: '.bridge-hidden', style: { 'display': 'none' } },
 ] as cytoscape.StylesheetJson
 
 // Edges that bridge two incident sections stay long so the simulation does
@@ -401,6 +388,15 @@ interface Tooltip {
   y: number
 }
 
+// A focus fog circle in rendered (screen) coordinates.
+interface SectionGlow {
+  id: string
+  x: number
+  y: number
+  d: number
+  hover: boolean
+}
+
 interface EdgeTooltip {
   kind: string
   confidence: number
@@ -423,9 +419,15 @@ export function GraphView({
   const [tooltip, setTooltip] = useState<Tooltip | null>(null)
   const [edgeTooltip, setEdgeTooltip] = useState<EdgeTooltip | null>(null)
   const [mini, setMini] = useState<MinimapData | null>(null)
+  const [glows, setGlows] = useState<SectionGlow[]>([])
   const assignmentRef = useRef<IncidentAssignment | null>(null)
   const sectionedIds = useRef(new Set<string>())
   const lastMiniAt = useRef(0)
+  const hoverSectionRef = useRef<string | null>(null)
+  const animatingRef = useRef(false)
+  // Last incident the camera flew to, deduped so repeated renders do not
+  // yank the camera away from a user who has panned off to explore.
+  const lastFlownRef = useRef<string | null>(null)
   const onNodeFocusRef = useRef(onNodeFocus)
   useEffect(() => { onNodeFocusRef.current = onNodeFocus })
   const onIncidentSelectRef = useRef(onIncidentSelect)
@@ -433,15 +435,17 @@ export function GraphView({
   const activeIncidentIdRef = useRef(activeIncidentId)
   useEffect(() => { activeIncidentIdRef.current = activeIncidentId })
 
-  // Snapshot of the map for the minimap overlay: section frames, orphan
-  // nodes, related-incident pairs, and the live viewport. Reads refs only,
-  // so cy event handlers can call it without going stale.
+  // Snapshot of the map overlays: minimap content (section frames, orphan
+  // nodes, related pairs, viewport) plus the focus fog circles for the
+  // active and hovered incidents. Reads refs only, so cy event handlers can
+  // call it without going stale.
   const recomputeMini = useCallback(() => {
     const cy = cyRef.current
     if (!cy) return
     const parents = cy.nodes(':parent')
     if (parents.length === 0) {
       setMini(null)
+      setGlows([])
       return
     }
     lastMiniAt.current = performance.now()
@@ -453,7 +457,7 @@ export function GraphView({
     }))
     const orphanDots = cy
       .nodes(':childless')
-      .filter((n) => n.isOrphan())
+      .filter((n) => n.isOrphan() && n.visible())
       .map((n) => ({ x: n.position('x'), y: n.position('y') }))
     setMini({
       world: cy.elements().boundingBox({}),
@@ -462,6 +466,72 @@ export function GraphView({
       viewport: cy.extent(),
       related: assignmentRef.current?.relatedPairs ?? [],
     })
+
+    const glowFor = (incidentId: string, hover: boolean): SectionGlow | null => {
+      const p = cy.getElementById(`section-${incidentId}`)
+      if (p.length === 0) return null
+      const bb = p.renderedBoundingBox({})
+      return {
+        id: incidentId,
+        x: (bb.x1 + bb.x2) / 2,
+        y: (bb.y1 + bb.y2) / 2,
+        d: Math.max(bb.x2 - bb.x1, bb.y2 - bb.y1) * 1.3,
+        hover,
+      }
+    }
+    const next: SectionGlow[] = []
+    const active = activeIncidentIdRef.current
+    if (active) {
+      const g = glowFor(active, false)
+      if (g) next.push(g)
+    }
+    const hovered = hoverSectionRef.current
+    if (hovered && hovered !== active) {
+      const g = glowFor(hovered, true)
+      if (g) next.push(g)
+    }
+    setGlows(next)
+  }, [])
+
+  // Auto-snap: once the user stops panning (canvas drag or minimap jump),
+  // ease the camera onto the nearest visible node and make its incident the
+  // active one, lighting its fog.
+  const snapToNearest = useCallback(() => {
+    const cy = cyRef.current
+    if (!cy || animatingRef.current) return
+    const ext = cy.extent()
+    const cx = (ext.x1 + ext.x2) / 2
+    const cyy = (ext.y1 + ext.y2) / 2
+    let best: cytoscape.NodeSingular | null = null
+    let bestD = Infinity
+    cy.nodes(':childless').forEach((n) => {
+      if (!n.visible()) return
+      const p = n.position()
+      const d = (p.x - cx) ** 2 + (p.y - cyy) ** 2
+      if (d < bestD) {
+        bestD = d
+        best = n
+      }
+    })
+    if (best === null) return
+    const target = best as cytoscape.NodeSingular
+    // Within a hair of center already: settled, nothing to do. This is also
+    // what terminates the snap-then-pan-event cycle.
+    if (Math.sqrt(bestD) * cy.zoom() > 14) {
+      animatingRef.current = true
+      cy.animate({
+        center: { eles: target },
+        duration: 340,
+        easing: 'ease-out-cubic',
+        complete: () => { animatingRef.current = false },
+      })
+    }
+    const incident = assignmentRef.current?.primary.get(target.id())
+    if (incident !== undefined && incident !== activeIncidentIdRef.current) {
+      // Arrived by panning; suppress the selection flight.
+      lastFlownRef.current = incident
+      onIncidentSelectRef.current?.(incident)
+    }
   }, [])
 
   // Mount Cytoscape once; tear it down on unmount
@@ -479,6 +549,10 @@ export function GraphView({
     })
     cyRef.current = cy
     labelBand.current = zoomToLabelClass(cy.zoom())
+    // Dev-only handle for debugging and UI test drivers.
+    if (import.meta.env.DEV) {
+      ;(window as unknown as { __cy?: Core }).__cy = cy
+    }
 
     // Tapping an edge pins its relationship: the canvas label stays revealed
     // and a tooltip with the full kind and confidence holds position until
@@ -492,17 +566,18 @@ export function GraphView({
 
     cy.on('tap', 'node', (e) => {
       const target = e.target as cytoscape.NodeSingular
-      // Tapping a section frame selects its incident instead of focusing.
-      if (target.isParent()) {
-        setTooltip(null)
-        clearPinnedEdge()
-        onIncidentSelectRef.current?.(target.data('incidentId') as string)
-        return
-      }
       const pos = e.renderedPosition
       setTooltip({ node: e.target.data() as WsNode, x: pos.x, y: pos.y })
       clearPinnedEdge()
       onNodeFocusRef.current?.(target.id())
+      // Tapping into another incident's cluster also makes that incident
+      // active, so every panel follows the user across the map. The camera
+      // stays put; they are already looking at it.
+      const incident = assignmentRef.current?.primary.get(target.id())
+      if (incident !== undefined && incident !== activeIncidentIdRef.current) {
+        lastFlownRef.current = incident
+        onIncidentSelectRef.current?.(incident)
+      }
     })
     cy.on('tap', (e) => {
       if (e.target === cy) {
@@ -513,22 +588,45 @@ export function GraphView({
     })
 
     // Obsidian-style hover: keep the closed neighborhood, fade the rest.
-    // Section frames never dim so the map keeps its structure.
+    // Hovering a node beside a hidden inter-incident bridge reveals the
+    // whole bridge path while the pointer stays, and hovering any node
+    // lights its incident's focus fog.
+    let revealedBridge: cytoscape.CollectionReturnValue | null = null
     cy.on('mouseover', 'node', (e) => {
       const target = e.target as cytoscape.NodeSingular
       if (target.isParent()) return
       const hood = target.closedNeighborhood()
+      const bridgeNodes = target.neighborhood('node.bridge')
+      const bridgeEdges = target.connectedEdges('.bridge')
+      let keep = hood
+      if (bridgeNodes.length > 0 || bridgeEdges.length > 0) {
+        revealedBridge = bridgeNodes
+          .union(bridgeEdges)
+          .union(bridgeNodes.connectedEdges())
+          .union(bridgeNodes.neighborhood())
+          .union(bridgeEdges.connectedNodes())
+        revealedBridge.removeClass('bridge-hidden')
+        keep = keep.union(revealedBridge)
+      }
       cy.batch(() => {
-        cy.elements().difference(hood).not(':parent').addClass('dim')
-        hood.addClass('hl')
+        cy.elements().difference(keep).not(':parent').addClass('dim')
+        keep.addClass('hl')
       })
+      hoverSectionRef.current = assignmentRef.current?.primary.get(target.id()) ?? null
+      recomputeMini()
     })
     cy.on('mouseout', 'node', () => {
       cy.batch(() => {
         const els = cy.elements()
         els.removeClass('dim')
         els.removeClass('hl')
+        if (revealedBridge) {
+          revealedBridge.filter('.bridge').addClass('bridge-hidden')
+          revealedBridge = null
+        }
       })
+      hoverSectionRef.current = null
+      recomputeMini()
     })
 
     // Edge hover reveals the relationship label on the canvas itself (no
@@ -586,9 +684,19 @@ export function GraphView({
       if (performance.now() - lastMiniAt.current > 200) recomputeMini()
     })
 
+    // Idle-pan detection drives the auto-snap; programmatic camera moves
+    // are excluded via the animating flag.
+    let panTimer: ReturnType<typeof setTimeout> | undefined
+    cy.on('pan', () => {
+      if (animatingRef.current) return
+      clearTimeout(panTimer)
+      panTimer = setTimeout(snapToNearest, 380)
+    })
+
     return () => {
       cancelAnimationFrame(rafId)
       cancelAnimationFrame(miniRaf)
+      clearTimeout(panTimer)
       layoutRef.current?.stop()
       layoutRef.current = null
       cy.destroy()
@@ -598,7 +706,7 @@ export function GraphView({
       sectionedIds.current.clear()
       firstBatch.current = true
     }
-  }, [recomputeMini])
+  }, [recomputeMini, snapToNearest])
 
   // Add new nodes and edges incrementally, then restart the simulation
   useEffect(() => {
@@ -723,9 +831,7 @@ export function GraphView({
     layoutRef.current.run()
   }, [nodes, edges])
 
-  // Camera flight to a section, deduped so repeated renders do not yank the
-  // camera away from a user who has panned off to explore.
-  const lastFlownRef = useRef<string | null>(null)
+  // Camera flight to a section.
   const flyToSection = useCallback((incidentId: string) => {
     const cy = cyRef.current
     if (!cy) return
@@ -733,10 +839,12 @@ export function GraphView({
     if (parent.length === 0) return
     lastFlownRef.current = incidentId
     cy.stop()
+    animatingRef.current = true
     cy.animate({
       fit: { eles: parent, padding: 70 },
       duration: 480,
       easing: 'ease-in-out-cubic',
+      complete: () => { animatingRef.current = false },
     })
   }, [])
 
@@ -783,7 +891,12 @@ export function GraphView({
             el.move({ parent: parentId })
           }
         } else {
-          el.addClass('shared-node')
+          // Shared nodes are the hidden inter-incident bridge: dashed ring
+          // when revealed, invisible until a neighbor is hovered.
+          if (!el.hasClass('shared-node')) {
+            changed = true
+            el.addClass('shared-node bridge bridge-hidden')
+          }
           if (el.parent().length > 0) {
             changed = true
             el.move({ parent: null })
@@ -800,20 +913,25 @@ export function GraphView({
           changed = true
           el.data('crossSection', cross)
         }
+        // A direct edge between two sections is itself a hidden bridge.
+        if (cross === 1 && !el.hasClass('bridge')) {
+          changed = true
+          el.addClass('bridge bridge-hidden')
+        }
       }
     })
 
-    // The first time a section forms, shove it clear of the others.
+    // The first time a section forms, settle it onto its grid slot so any
+    // number of incidents stays organized in reading order.
     for (const section of assignment.sections) {
       if (sectionedIds.current.has(section.id)) continue
-      sectionedIds.current.add(section.id)
       const parent = cy.getElementById(`section-${section.id}`)
       if (parent.length === 0) continue
-      const fixed = cy
-        .nodes(':parent')
-        .filter((p) => p.id() !== parent.id())
-        .map((p) => p.boundingBox({}))
-      const { dx, dy } = escapeOverlap(parent.boundingBox({}), fixed, 140)
+      sectionedIds.current.add(section.id)
+      const slot = sectionSlot(sectionedIds.current.size - 1)
+      const bb = parent.boundingBox({})
+      const dx = slot.x - (bb.x1 + bb.x2) / 2
+      const dy = slot.y - (bb.y1 + bb.y2) / 2
       if (dx !== 0 || dy !== 0) {
         changed = true
         parent.descendants().forEach((n) => {
@@ -831,15 +949,13 @@ export function GraphView({
     }
   }, [nodes, edges, incidents, recomputeMini])
 
-  // Selecting an incident lights its frame and flies the camera to it.
+  // Selecting an incident flies the camera to its section and refreshes the
+  // overlays so its fog lights up.
   useEffect(() => {
     const cy = cyRef.current
-    if (!cy) return
-    cy.nodes(':parent').removeClass('section-active')
-    if (!activeIncidentId) return
+    if (!cy || !activeIncidentId) return
     const parent = cy.getElementById(`section-${activeIncidentId}`)
     if (parent.length === 0) return
-    parent.addClass('section-active')
     if (lastFlownRef.current !== activeIncidentId) flyToSection(activeIncidentId)
     recomputeMini()
   }, [activeIncidentId, incidents, flyToSection, recomputeMini])
@@ -950,10 +1066,17 @@ export function GraphView({
     if (!cy) return
     const zoom = cy.zoom()
     cy.stop()
+    animatingRef.current = true
     cy.animate({
       pan: { x: cy.width() / 2 - x * zoom, y: cy.height() / 2 - y * zoom },
       duration: 300,
       easing: 'ease-in-out-cubic',
+      // Landing from a minimap jump settles like a pan: snap to the nearest
+      // node and light its incident.
+      complete: () => {
+        animatingRef.current = false
+        snapToNearest()
+      },
     })
   }
 
@@ -967,6 +1090,13 @@ export function GraphView({
   return (
     <div className="graph-view">
       <div ref={containerRef} className="graph-canvas" />
+      {glows.map((g) => (
+        <div
+          key={`${g.id}${g.hover ? '-hover' : ''}`}
+          className={`section-glow${g.hover ? ' section-glow-hover' : ''}`}
+          style={{ left: g.x, top: g.y, width: g.d, height: g.d }}
+        />
+      ))}
       {mini && (
         <Minimap data={mini} onSectionClick={handleMiniSection} onJump={handleMiniJump} />
       )}

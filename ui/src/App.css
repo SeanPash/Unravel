@@ -245,6 +245,32 @@
   background-size: 26px 26px, 100% 100%, 100% 100%, 100% 100%;
 }
 
+/* ─── Incident focus fog ──────────────────────────────────────────────── */
+
+/* A circular fog of light behind the focused incident: pure radial fade to
+   transparent, screen-blended so it only ever brightens. Positioned in
+   rendered coordinates by GraphView and kept in step with the camera. */
+.section-glow {
+  position: absolute;
+  z-index: 5;
+  pointer-events: none;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  background: radial-gradient(
+    circle,
+    rgba(79, 167, 217, 0.14) 0%,
+    rgba(79, 167, 217, 0.05) 42%,
+    rgba(79, 167, 217, 0) 68%
+  );
+  mix-blend-mode: screen;
+  transition: opacity 0.25s ease;
+}
+
+/* Hover preview: present but quieter than the active incident's fog */
+.section-glow-hover {
+  opacity: 0.6;
+}
+
 /* ─── Incident minimap ────────────────────────────────────────────────── */
 
 .graph-minimap {
