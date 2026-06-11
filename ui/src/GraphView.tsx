@@ -1163,7 +1163,7 @@ export function GraphView({
         <div className="graph-ctrl-sep" />
         <button
           className={`graph-ctrl-btn${snapEnabled ? ' graph-ctrl-btn-on' : ''}`}
-          title={snapEnabled ? 'Auto-snap to nearest incident: on' : 'Auto-snap to nearest incident: off'}
+          title="Toggle auto snap"
           aria-pressed={snapEnabled}
           onClick={toggleSnap}
           style={{ fontSize: 9, fontWeight: 600, letterSpacing: '0.04em' }}

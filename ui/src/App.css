@@ -248,8 +248,10 @@
 /* ─── Incident focus fog ──────────────────────────────────────────────── */
 
 /* A circular fog of light behind the focused incident: pure radial fade to
-   transparent, screen-blended so it only ever brightens. Positioned in
-   rendered coordinates by GraphView and kept in step with the camera. */
+   transparent, screen-blended so it only ever brightens. Red ties it to the
+   active-incident accent; the long falloff keeps it translucent rather than
+   alarming. Positioned in rendered coordinates by GraphView and kept in
+   step with the camera. */
 .section-glow {
   position: absolute;
   z-index: 5;
@@ -258,9 +260,9 @@
   border-radius: 50%;
   background: radial-gradient(
     circle,
-    rgba(79, 167, 217, 0.14) 0%,
-    rgba(79, 167, 217, 0.05) 42%,
-    rgba(79, 167, 217, 0) 68%
+    rgba(220, 78, 65, 0.21) 0%,
+    rgba(220, 78, 65, 0.08) 44%,
+    rgba(220, 78, 65, 0) 70%
   );
   mix-blend-mode: screen;
   transition: opacity 0.25s ease;
