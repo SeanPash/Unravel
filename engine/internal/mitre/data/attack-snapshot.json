@@ -1,0 +1,67 @@
+{
+  "T1566.001": {
+    "id": "T1566.001",
+    "name": "Phishing: Spearphishing Attachment",
+    "groups": ["APT28", "APT29", "FIN7", "Emotet operators"],
+    "software": ["Emotet", "TrickBot", "Qakbot"],
+    "mitigations": [
+      "Train users to recognize malicious attachments and macro prompts",
+      "Block macro execution from internet-sourced Office documents",
+      "Use attachment sandboxing at the mail gateway"
+    ]
+  },
+  "T1059.001": {
+    "id": "T1059.001",
+    "name": "Command and Scripting Interpreter: PowerShell",
+    "groups": ["APT29", "FIN7", "Cobalt Group"],
+    "software": ["Empire", "PowerSploit", "Cobalt Strike"],
+    "mitigations": [
+      "Enable PowerShell Constrained Language Mode",
+      "Enable script block and module logging",
+      "Restrict execution policy and use application control (WDAC)"
+    ]
+  },
+  "T1059.003": {
+    "id": "T1059.003",
+    "name": "Command and Scripting Interpreter: Windows Command Shell",
+    "groups": ["APT3", "FIN6"],
+    "software": ["Cobalt Strike"],
+    "mitigations": [
+      "Use application control to restrict cmd.exe where feasible",
+      "Enable command-line process auditing"
+    ]
+  },
+  "T1003.001": {
+    "id": "T1003.001",
+    "name": "OS Credential Dumping: LSASS Memory",
+    "groups": ["APT28", "APT29", "Lazarus Group", "Wizard Spider"],
+    "software": ["Mimikatz", "gsecdump", "Pwdump"],
+    "mitigations": [
+      "Enable LSA Protection (RunAsPPL)",
+      "Enable Credential Guard on supported hosts",
+      "Restrict and monitor SeDebugPrivilege usage"
+    ]
+  },
+  "T1550.003": {
+    "id": "T1550.003",
+    "name": "Use Alternate Authentication Material: Pass the Ticket",
+    "groups": ["APT29", "Wizard Spider"],
+    "software": ["Mimikatz", "Rubeus"],
+    "mitigations": [
+      "Reset the krbtgt account password twice to invalidate forged tickets",
+      "Limit credential overlap across systems",
+      "Monitor for anomalous Kerberos TGS/TGT requests"
+    ]
+  },
+  "T1078.002": {
+    "id": "T1078.002",
+    "name": "Valid Accounts: Domain Accounts",
+    "groups": ["APT29", "Wizard Spider", "FIN6"],
+    "software": [],
+    "mitigations": [
+      "Enforce least privilege for domain admin accounts",
+      "Require MFA for privileged logons",
+      "Alert on domain admin logons to unexpected hosts"
+    ]
+  }
+}
