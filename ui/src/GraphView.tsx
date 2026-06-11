@@ -425,6 +425,8 @@ export function GraphView({
   const lastMiniAt = useRef(0)
   const hoverSectionRef = useRef<string | null>(null)
   const animatingRef = useRef(false)
+  const [snapEnabled, setSnapEnabled] = useState(true)
+  const snapEnabledRef = useRef(true)
   // Last incident the camera flew to, deduped so repeated renders do not
   // yank the camera away from a user who has panned off to explore.
   const lastFlownRef = useRef<string | null>(null)
@@ -494,11 +496,12 @@ export function GraphView({
   }, [])
 
   // Auto-snap: once the user stops panning (canvas drag or minimap jump),
-  // ease the camera onto the nearest visible node and make its incident the
-  // active one, lighting its fog.
+  // frame the nearest incident's whole graph. The user's zoom is kept
+  // unless the section cannot fit at it, in which case the camera zooms out
+  // just enough; it never zooms the user in.
   const snapToNearest = useCallback(() => {
     const cy = cyRef.current
-    if (!cy || animatingRef.current) return
+    if (!cy || animatingRef.current || !snapEnabledRef.current) return
     const ext = cy.extent()
     const cx = (ext.x1 + ext.x2) / 2
     const cyy = (ext.y1 + ext.y2) / 2
@@ -515,8 +518,42 @@ export function GraphView({
     })
     if (best === null) return
     const target = best as cytoscape.NodeSingular
-    // Within a hair of center already: settled, nothing to do. This is also
-    // what terminates the snap-then-pan-event cycle.
+    const incident = assignmentRef.current?.primary.get(target.id())
+    const parent = incident !== undefined ? cy.getElementById(`section-${incident}`) : null
+
+    if (incident !== undefined && parent !== null && parent.length > 0) {
+      const bb = parent.boundingBox({})
+      const pad = 70
+      const fitZoom = Math.min(
+        (cy.width() - pad * 2) / Math.max(bb.x2 - bb.x1, 1),
+        (cy.height() - pad * 2) / Math.max(bb.y2 - bb.y1, 1),
+      )
+      const zoom = Math.max(Math.min(cy.zoom(), fitZoom), 0.2)
+      const bx = (bb.x1 + bb.x2) / 2
+      const by = (bb.y1 + bb.y2) / 2
+      // Already framed: settled, nothing to do. This is also what
+      // terminates the snap-then-pan-event cycle.
+      const settled = Math.abs(zoom - cy.zoom()) < 1e-3
+        && Math.hypot(bx - cx, by - cyy) * cy.zoom() < 14
+      if (!settled) {
+        animatingRef.current = true
+        cy.animate({
+          zoom,
+          center: { eles: parent },
+          duration: 380,
+          easing: 'ease-out-cubic',
+          complete: () => { animatingRef.current = false },
+        })
+      }
+      if (incident !== activeIncidentIdRef.current) {
+        // Arrived by panning; suppress the selection flight.
+        lastFlownRef.current = incident
+        onIncidentSelectRef.current?.(incident)
+      }
+      return
+    }
+
+    // Unattributed activity: settle on the node itself at the current zoom.
     if (Math.sqrt(bestD) * cy.zoom() > 14) {
       animatingRef.current = true
       cy.animate({
@@ -525,12 +562,6 @@ export function GraphView({
         easing: 'ease-out-cubic',
         complete: () => { animatingRef.current = false },
       })
-    }
-    const incident = assignmentRef.current?.primary.get(target.id())
-    if (incident !== undefined && incident !== activeIncidentIdRef.current) {
-      // Arrived by panning; suppress the selection flight.
-      lastFlownRef.current = incident
-      onIncidentSelectRef.current?.(incident)
     }
   }, [])
 
@@ -1022,22 +1053,45 @@ export function GraphView({
     })
   }, [timeWindow])
 
+  // Deliberate camera commands (buttons) must not hand the view straight
+  // back to the auto-snap: the flag swallows the pan events they emit.
+  function suppressSnapDuring(fn: () => void) {
+    animatingRef.current = true
+    fn()
+    window.setTimeout(() => { animatingRef.current = false }, 60)
+  }
+
+  function toggleSnap() {
+    setSnapEnabled((on) => {
+      snapEnabledRef.current = !on
+      return !on
+    })
+  }
+
   function zoomBy(factor: number) {
     const cy = cyRef.current
     if (!cy) return
-    cy.zoom({ level: cy.zoom() * factor, renderedPosition: { x: cy.width() / 2, y: cy.height() / 2 } })
+    suppressSnapDuring(() => {
+      cy.zoom({ level: cy.zoom() * factor, renderedPosition: { x: cy.width() / 2, y: cy.height() / 2 } })
+    })
   }
 
   function fitAll() {
     const cy = cyRef.current
     if (!cy) return
-    cy.fit(cy.elements(), 30)
-    if (cy.zoom() > 1.5) { cy.zoom(1.5); cy.center(cy.elements()) }
+    suppressSnapDuring(() => {
+      cy.fit(cy.elements(), 30)
+      if (cy.zoom() > 1.5) { cy.zoom(1.5); cy.center(cy.elements()) }
+    })
   }
 
   function rotateGraph() {
     const cy = cyRef.current
     if (!cy) return
+    suppressSnapDuring(() => rotateGraphNow(cy))
+  }
+
+  function rotateGraphNow(cy: Core) {
     // Rotate all node positions 90° clockwise around the graph centroid.
     // Distances between nodes are preserved so cola never tangles after rotation.
     const bb = cy.elements().boundingBox({})
@@ -1106,6 +1160,16 @@ export function GraphView({
         <div className="graph-ctrl-sep" />
         <button className="graph-ctrl-btn" title="Fit to viewport" onClick={fitAll} style={{ fontSize: 10, fontWeight: 600, letterSpacing: '0.06em' }}>FIT</button>
         <button className="graph-ctrl-btn" title="Rotate 90°" onClick={rotateGraph}>&#8635;</button>
+        <div className="graph-ctrl-sep" />
+        <button
+          className={`graph-ctrl-btn${snapEnabled ? ' graph-ctrl-btn-on' : ''}`}
+          title={snapEnabled ? 'Auto-snap to nearest incident: on' : 'Auto-snap to nearest incident: off'}
+          aria-pressed={snapEnabled}
+          onClick={toggleSnap}
+          style={{ fontSize: 9, fontWeight: 600, letterSpacing: '0.04em' }}
+        >
+          SNAP
+        </button>
       </div>
       <div className="graph-legend">
         {(Object.entries(KIND_COLORS) as [WsNode['kind'], string][]).map(([kind, color]) => (

@@ -516,6 +516,20 @@
   box-shadow: none;
 }
 
+/* Latched toggle (auto-snap): amber when engaged */
+.graph-ctrl-btn-on {
+  color: var(--accent-amber);
+  border-color: rgba(240, 180, 41, 0.5);
+  background: linear-gradient(180deg, rgba(240, 180, 41, 0.16), rgba(18, 23, 28, 0.9));
+}
+
+.graph-ctrl-btn-on:hover {
+  color: var(--accent-amber);
+  border-color: rgba(240, 180, 41, 0.7);
+  background: linear-gradient(180deg, rgba(240, 180, 41, 0.24), rgba(18, 23, 28, 0.9));
+  box-shadow: 0 0 12px rgba(240, 180, 41, 0.15), inset 0 1px 0 rgba(221, 227, 233, 0.08);
+}
+
 .graph-ctrl-sep {
   height: 1px;
   background: linear-gradient(90deg, transparent, rgba(79, 167, 217, 0.3), transparent);
