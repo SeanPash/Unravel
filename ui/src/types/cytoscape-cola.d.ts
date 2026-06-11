@@ -16,7 +16,7 @@ interface ColaLayoutOptions extends Record<string, unknown> {
   fit?: boolean
   centerGraph?: boolean
   nodeSpacing?: number
-  edgeLength?: number
+  edgeLength?: number | ((edge: import('cytoscape').EdgeSingular) => number)
   avoidOverlap?: boolean
   ungrabifyWhileSimulating?: boolean
   randomize?: boolean

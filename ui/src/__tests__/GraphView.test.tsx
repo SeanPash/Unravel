@@ -62,14 +62,13 @@ describe('scoreToColor', () => {
     expect(scoreToColor(0)).toBe('rgb(110, 124, 140)')
   })
 
-  it('returns the Splunk amber anchor at score 0.5', () => {
+  it('returns the Splunk amber anchor at score 1, reserving red for the chain', () => {
     // #f8be34
-    expect(scoreToColor(0.5)).toBe('rgb(248, 190, 52)')
+    expect(scoreToColor(1)).toBe('rgb(248, 190, 52)')
   })
 
-  it('returns the Splunk red anchor at score 1', () => {
-    // #dc4e41
-    expect(scoreToColor(1)).toBe('rgb(220, 78, 65)')
+  it('blends between the anchors at score 0.5', () => {
+    expect(scoreToColor(0.5)).toBe('rgb(179, 157, 96)')
   })
 
   it('clamps values below 0 to the low anchor', () => {
@@ -107,7 +106,7 @@ describe('kindToColor', () => {
 
 describe('degreeToSize', () => {
   it('returns the minimum size at degree 0', () => {
-    expect(degreeToSize(0)).toBe(14)
+    expect(degreeToSize(0)).toBe(16)
   })
 
   it('strictly increases with degree until the cap', () => {
@@ -117,13 +116,13 @@ describe('degreeToSize', () => {
   })
 
   it('caps at the maximum size for highly connected nodes', () => {
-    expect(degreeToSize(100)).toBe(44)
-    expect(degreeToSize(10_000)).toBe(44)
+    expect(degreeToSize(100)).toBe(52)
+    expect(degreeToSize(10_000)).toBe(52)
   })
 
   it('never returns NaN, even for negative input', () => {
     expect(Number.isNaN(degreeToSize(-5))).toBe(false)
-    expect(degreeToSize(-5)).toBe(14)
+    expect(degreeToSize(-5)).toBe(16)
   })
 })
 
@@ -135,15 +134,15 @@ describe('zoomToLabelClass', () => {
     expect(zoomToLabelClass(0.49)).toBe('labels-off')
   })
 
-  it('shows faint labels at low-mid zoom', () => {
+  it('shows faint shortened labels at mid zoom', () => {
     expect(zoomToLabelClass(0.5)).toBe('labels-faint')
     expect(zoomToLabelClass(0.7)).toBe('labels-faint')
-    expect(zoomToLabelClass(0.89)).toBe('labels-faint')
+    expect(zoomToLabelClass(0.99)).toBe('labels-faint')
   })
 
-  it('shows full labels at default zoom and in', () => {
-    expect(zoomToLabelClass(0.9)).toBe('labels-on')
-    expect(zoomToLabelClass(1.1)).toBe('labels-on')
+  it('shows full labels when zoomed in', () => {
+    expect(zoomToLabelClass(1.0)).toBe('labels-on')
+    expect(zoomToLabelClass(1.5)).toBe('labels-on')
     expect(zoomToLabelClass(3)).toBe('labels-on')
   })
 })
