@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -131,5 +132,41 @@ func TestNewMessage_RoundTrip(t *testing.T) {
 	}
 	if len(got.Edges) != 1 || got.Edges[0].Kind != EdgeKindSpawned {
 		t.Errorf("edges round-trip lost data: %+v", got.Edges)
+	}
+}
+
+func TestChainStepCarriesTechniqueFields(t *testing.T) {
+	step := ChainStep{
+		EventID: "evt-1", Description: "d", Confidence: 0.9, TS: 1,
+		TechniqueID: "T1003.001", TechniqueName: "LSASS Memory", Tactic: "Credential Access",
+	}
+	b, err := json.Marshal(step)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(b)
+	for _, want := range []string{`"technique_id":"T1003.001"`, `"technique_name":"LSASS Memory"`, `"tactic":"Credential Access"`} {
+		if !strings.Contains(got, want) {
+			t.Errorf("marshalled step missing %s: %s", want, got)
+		}
+	}
+}
+
+func TestThreatIntelPayloadRoundTrips(t *testing.T) {
+	p := ThreatIntelPayload{
+		Status:  "ok",
+		Summary: "s",
+		Techniques: []ThreatIntelTechnique{
+			{ID: "T1003.001", Name: "LSASS Memory", Groups: []string{"APT29"}, Software: []string{"Mimikatz"}, Mitigations: []string{"M1"}},
+		},
+		CVEMatches: []CVEMatch{{ID: "CVE-1", Summary: "x", InKEV: true, Severity: "HIGH"}},
+	}
+	b, _ := json.Marshal(p)
+	var back ThreatIntelPayload
+	if err := json.Unmarshal(b, &back); err != nil {
+		t.Fatal(err)
+	}
+	if back.Techniques[0].Software[0] != "Mimikatz" || back.CVEMatches[0].InKEV != true {
+		t.Errorf("round trip mismatch: %+v", back)
 	}
 }
