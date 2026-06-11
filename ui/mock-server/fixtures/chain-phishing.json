@@ -229,5 +229,21 @@
       ],
       "cve_matches": []
     }
+  },
+  {
+    "type": "graph_update",
+    "payload": {
+      "nodes": [
+        { "id": "flow-ws02-dc01", "kind": "NetFlow", "label": "WS02:49832 -> DC01:445", "attrs": { "proto": "SMB", "dst_port": 445, "ts": 1749103720 } }
+      ],
+      "edges": [
+        { "id": "edge-203", "src": "proc-rundll32-2", "dst": "flow-ws02-dc01", "kind": "initiated", "ts": 1749103720, "confidence": 0.66, "source_event_id": "evt-203" },
+        { "id": "edge-204", "src": "flow-ws02-dc01", "dst": "host-dc01", "kind": "targeted", "ts": 1749103720, "confidence": 0.66, "source_event_id": "evt-203" }
+      ]
+    }
+  },
+  {
+    "type": "log_event",
+    "payload": { "event_id": "evt-203", "ts": 1749103720, "source": "sysmon", "raw": { "EventID": "3", "host": "WS02", "Image": "rundll32.exe", "DestinationIp": "192.168.56.10", "DestinationPort": 445, "Protocol": "tcp" } }
   }
 ]

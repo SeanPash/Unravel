@@ -1,8 +1,12 @@
-import { useRef, useEffect, useState } from 'react'
+import { useRef, useEffect, useState, useCallback } from 'react'
 import cytoscape from 'cytoscape'
 import cola from 'cytoscape-cola'
 import type { Core } from 'cytoscape'
 import type { WsNode, WsEdge, ChainResultPayload } from './ws'
+import { assignIncidents, escapeOverlap } from './incidentMap'
+import type { IncidentRef, IncidentAssignment } from './incidentMap'
+import { Minimap } from './Minimap'
+import type { MinimapData } from './Minimap'
 
 cytoscape.use(cola)
 
@@ -13,6 +17,11 @@ export interface GraphViewProps {
   timeWindow?: [number, number] | null
   focusedNodeId?: string | null
   onNodeFocus?: (nodeId: string | null) => void
+  // Incident map: each incident's subgraph lives in its own labeled section
+  // of the canvas; selecting an incident flies the camera to its section.
+  incidents?: IncidentRef[]
+  activeIncidentId?: string | null
+  onIncidentSelect?: (incidentId: string) => void
 }
 
 // --- Pure helpers (exported for unit tests) ---
@@ -156,20 +165,12 @@ export function desiredEdgeLength(kind: string): number {
 // --bg-panel = #12171c, --bg-page = #0c0d10
 
 const CY_STYLE = [
-  // Base node: size and label layout. Per-kind rules below override fill.
+  // Base node: label layout shared by all nodes. Sizing and fill live on the
+  // :childless rule so incident-section compounds can auto-size to their
+  // children. Per-kind rules below override fill.
   {
     selector: 'node',
     style: {
-      'shape': 'ellipse',
-      'background-color': '#53a051',
-      'background-opacity': 0.92,
-      'width': (ele: cytoscape.NodeSingular) => degreeToSize((ele.data('degree') as number) ?? 0),
-      'height': (ele: cytoscape.NodeSingular) => degreeToSize((ele.data('degree') as number) ?? 0),
-      // Outer glow ring: same hue as fill at low opacity for depth
-      'border-width': 3,
-      'border-color': '#53a051',
-      'border-opacity': 0.22,
-      'border-style': 'solid',
       // Label: 3-char code by default; the labels-on band swaps in the
       // concise display name (basename only, never the raw path or
       // DOMAIN\user). Positioned below the node with clear spacing.
@@ -188,6 +189,22 @@ const CY_STYLE = [
       'text-outline-opacity': 0.9,
       'transition-property': 'opacity, text-opacity, border-opacity',
       'transition-duration': 150,
+    },
+  },
+  // Leaf nodes: spheres sized by degree. Compounds get their own block below.
+  {
+    selector: 'node:childless',
+    style: {
+      'shape': 'ellipse',
+      'background-color': '#53a051',
+      'background-opacity': 0.92,
+      'width': (ele: cytoscape.NodeSingular) => degreeToSize((ele.data('degree') as number) ?? 0),
+      'height': (ele: cytoscape.NodeSingular) => degreeToSize((ele.data('degree') as number) ?? 0),
+      // Outer glow ring: same hue as fill at low opacity for depth
+      'border-width': 3,
+      'border-color': '#53a051',
+      'border-opacity': 0.22,
+      'border-style': 'solid',
     },
   },
   // Per-kind radial gradients: lighter center -> darker edge for sphere look
@@ -303,7 +320,57 @@ const CY_STYLE = [
     },
   },
   { selector: '.ts-hidden', style: { 'display': 'none' } },
+  // Incident sections: compound frames that auto-size to their children.
+  // Declared last so the frame label always wins over the zoom-band rules.
+  {
+    selector: ':parent',
+    style: {
+      'shape': 'round-rectangle',
+      'corner-radius': 14,
+      'background-color': '#151e27',
+      'background-opacity': 0.34,
+      'border-width': 1.5,
+      'border-color': '#2c3a47',
+      'border-opacity': 0.9,
+      'border-style': 'solid',
+      'padding': 42,
+      'label': 'data(label)',
+      'font-size': 13,
+      'font-family': '"Oswald", "Arial Narrow", sans-serif',
+      'color': '#8a99a8',
+      'text-valign': 'top',
+      'text-halign': 'center',
+      'text-margin-y': -10,
+      'text-opacity': 0.92,
+      'text-outline-opacity': 0,
+    },
+  },
+  {
+    selector: ':parent.section-active',
+    style: {
+      'border-color': '#dc4e41',
+      'border-opacity': 1,
+      'background-color': '#1a222c',
+      'background-opacity': 0.42,
+      'color': '#dde3e9',
+      'text-opacity': 1,
+    },
+  },
+  // Nodes reached by more than one incident: they sit between sections and
+  // wear a dashed neutral ring marking them as the connection point.
+  {
+    selector: 'node.shared-node',
+    style: {
+      'border-style': 'dashed',
+      'border-color': '#8a99a8',
+      'border-opacity': 0.75,
+    },
+  },
 ] as cytoscape.StylesheetJson
+
+// Edges that bridge two incident sections stay long so the simulation does
+// not drag the sections into each other.
+const CROSS_SECTION_EDGE_LENGTH = 460
 
 // Continuous force simulation, Obsidian-style: the graph keeps settling,
 // new nodes push neighbors aside, dragging a node tugs what it touches.
@@ -315,7 +382,10 @@ const COLA_OPTIONS: ColaLayoutOptions = {
   fit: false,
   centerGraph: false,
   nodeSpacing: 24,
-  edgeLength: (edge) => desiredEdgeLength((edge.data('kind') as string) ?? ''),
+  edgeLength: (edge) =>
+    edge.data('crossSection')
+      ? CROSS_SECTION_EDGE_LENGTH
+      : desiredEdgeLength((edge.data('kind') as string) ?? ''),
   avoidOverlap: true,
   ungrabifyWhileSimulating: false,
   randomize: false,
@@ -337,7 +407,10 @@ interface EdgeTooltip {
   y: number
 }
 
-export function GraphView({ nodes, edges, chain, timeWindow, focusedNodeId, onNodeFocus }: GraphViewProps) {
+export function GraphView({
+  nodes, edges, chain, timeWindow, focusedNodeId, onNodeFocus,
+  incidents, activeIncidentId, onIncidentSelect,
+}: GraphViewProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const cyRef = useRef<Core | null>(null)
   const layoutRef = useRef<cytoscape.Layouts | null>(null)
@@ -347,8 +420,47 @@ export function GraphView({ nodes, edges, chain, timeWindow, focusedNodeId, onNo
   const firstBatch = useRef(true)
   const [tooltip, setTooltip] = useState<Tooltip | null>(null)
   const [edgeTooltip, setEdgeTooltip] = useState<EdgeTooltip | null>(null)
+  const [mini, setMini] = useState<MinimapData | null>(null)
+  const assignmentRef = useRef<IncidentAssignment | null>(null)
+  const sectionedIds = useRef(new Set<string>())
+  const lastMiniAt = useRef(0)
   const onNodeFocusRef = useRef(onNodeFocus)
   useEffect(() => { onNodeFocusRef.current = onNodeFocus })
+  const onIncidentSelectRef = useRef(onIncidentSelect)
+  useEffect(() => { onIncidentSelectRef.current = onIncidentSelect })
+  const activeIncidentIdRef = useRef(activeIncidentId)
+  useEffect(() => { activeIncidentIdRef.current = activeIncidentId })
+
+  // Snapshot of the map for the minimap overlay: section frames, orphan
+  // nodes, related-incident pairs, and the live viewport. Reads refs only,
+  // so cy event handlers can call it without going stale.
+  const recomputeMini = useCallback(() => {
+    const cy = cyRef.current
+    if (!cy) return
+    const parents = cy.nodes(':parent')
+    if (parents.length === 0) {
+      setMini(null)
+      return
+    }
+    lastMiniAt.current = performance.now()
+    const sections = parents.map((p) => ({
+      id: p.data('incidentId') as string,
+      label: p.data('label') as string,
+      bb: p.boundingBox({}),
+      active: p.data('incidentId') === activeIncidentIdRef.current,
+    }))
+    const orphanDots = cy
+      .nodes(':childless')
+      .filter((n) => n.isOrphan())
+      .map((n) => ({ x: n.position('x'), y: n.position('y') }))
+    setMini({
+      world: cy.elements().boundingBox({}),
+      sections,
+      orphanDots,
+      viewport: cy.extent(),
+      related: assignmentRef.current?.relatedPairs ?? [],
+    })
+  }, [])
 
   // Mount Cytoscape once; tear it down on unmount
   useEffect(() => {
@@ -377,10 +489,18 @@ export function GraphView({ nodes, edges, chain, timeWindow, focusedNodeId, onNo
     }
 
     cy.on('tap', 'node', (e) => {
+      const target = e.target as cytoscape.NodeSingular
+      // Tapping a section frame selects its incident instead of focusing.
+      if (target.isParent()) {
+        setTooltip(null)
+        clearPinnedEdge()
+        onIncidentSelectRef.current?.(target.data('incidentId') as string)
+        return
+      }
       const pos = e.renderedPosition
       setTooltip({ node: e.target.data() as WsNode, x: pos.x, y: pos.y })
       clearPinnedEdge()
-      onNodeFocusRef.current?.((e.target as cytoscape.NodeSingular).id())
+      onNodeFocusRef.current?.(target.id())
     })
     cy.on('tap', (e) => {
       if (e.target === cy) {
@@ -390,11 +510,14 @@ export function GraphView({ nodes, edges, chain, timeWindow, focusedNodeId, onNo
       }
     })
 
-    // Obsidian-style hover: keep the closed neighborhood, fade the rest
+    // Obsidian-style hover: keep the closed neighborhood, fade the rest.
+    // Section frames never dim so the map keeps its structure.
     cy.on('mouseover', 'node', (e) => {
-      const hood = (e.target as cytoscape.NodeSingular).closedNeighborhood()
+      const target = e.target as cytoscape.NodeSingular
+      if (target.isParent()) return
+      const hood = target.closedNeighborhood()
       cy.batch(() => {
-        cy.elements().difference(hood).addClass('dim')
+        cy.elements().difference(hood).not(':parent').addClass('dim')
         hood.addClass('hl')
       })
     })
@@ -450,17 +573,30 @@ export function GraphView({ nodes, edges, chain, timeWindow, focusedNodeId, onNo
       })
     })
 
+    // Keep the minimap in step with the camera (every pan/zoom frame) and
+    // with the continuous simulation (time-throttled on render frames).
+    let miniRaf = 0
+    cy.on('viewport', () => {
+      cancelAnimationFrame(miniRaf)
+      miniRaf = requestAnimationFrame(recomputeMini)
+    })
+    cy.on('render', () => {
+      if (performance.now() - lastMiniAt.current > 200) recomputeMini()
+    })
+
     return () => {
       cancelAnimationFrame(rafId)
+      cancelAnimationFrame(miniRaf)
       layoutRef.current?.stop()
       layoutRef.current = null
       cy.destroy()
       cyRef.current = null
       addedNodeIds.current.clear()
       addedEdgeIds.current.clear()
+      sectionedIds.current.clear()
       firstBatch.current = true
     }
-  }, [])
+  }, [recomputeMini])
 
   // Add new nodes and edges incrementally, then restart the simulation
   useEffect(() => {
@@ -474,6 +610,9 @@ export function GraphView({ nodes, edges, chain, timeWindow, focusedNodeId, onNo
 
     // Seed each new node at a connected neighbor's position (plus jitter)
     // so it pushes outward organically instead of flying in from afar.
+    // Disconnected newcomers (the start of a separate incident) spawn in
+    // clear space to the right of the existing graph rather than on top of
+    // it, so incident clusters never stack.
     const seedPosition = (id: string): { x: number; y: number } => {
       for (const e of edges) {
         if (e.src !== id && e.dst !== id) continue
@@ -489,6 +628,10 @@ export function GraphView({ nodes, edges, chain, timeWindow, focusedNodeId, onNo
             return { x: p.x + jitter(), y: p.y + jitter() }
           }
         }
+      }
+      if (priorNodeIds.size > 0) {
+        const bb = cy.elements().boundingBox({})
+        return { x: bb.x2 + 280 + jitter(), y: (bb.y1 + bb.y2) / 2 + jitter() }
       }
       return { x: cy.width() / 2 + jitter(), y: cy.height() / 2 + jitter() }
     }
@@ -578,6 +721,127 @@ export function GraphView({ nodes, edges, chain, timeWindow, focusedNodeId, onNo
     layoutRef.current.run()
   }, [nodes, edges])
 
+  // Camera flight to a section, deduped so repeated renders do not yank the
+  // camera away from a user who has panned off to explore.
+  const lastFlownRef = useRef<string | null>(null)
+  const flyToSection = useCallback((incidentId: string) => {
+    const cy = cyRef.current
+    if (!cy) return
+    const parent = cy.getElementById(`section-${incidentId}`)
+    if (parent.length === 0) return
+    lastFlownRef.current = incidentId
+    cy.stop()
+    cy.animate({
+      fit: { eles: parent, padding: 70 },
+      duration: 480,
+      easing: 'ease-in-out-cubic',
+    })
+  }, [])
+
+  // Build and maintain the incident sections: a compound frame per incident,
+  // node ownership from BFS over each chain, shared nodes left out between
+  // frames, and cross-section edges flagged so the simulation keeps the
+  // sections apart. A newly formed section that lands on top of an existing
+  // one is translated into free space.
+  useEffect(() => {
+    const cy = cyRef.current
+    if (!cy || !incidents || incidents.length === 0) return
+
+    const assignment = assignIncidents(nodes, edges, incidents)
+    assignmentRef.current = assignment
+
+    let changed = false
+    cy.batch(() => {
+      for (const section of assignment.sections) {
+        const parentId = `section-${section.id}`
+        if (cy.getElementById(parentId).length === 0) {
+          changed = true
+          cy.add({
+            group: 'nodes',
+            data: {
+              id: parentId,
+              label: section.label.toUpperCase(),
+              shortLabel: section.label.toUpperCase(),
+              abbrev: section.label.toUpperCase(),
+              incidentId: section.id,
+            },
+          })
+        }
+      }
+      for (const [nodeId, owners] of assignment.reachedBy) {
+        const el = cy.getElementById(nodeId)
+        if (el.length === 0 || el.isParent()) continue
+        if (owners.length === 1) {
+          const parentId = `section-${owners[0]}`
+          el.removeClass('shared-node')
+          const current = el.parent()
+          if ((current.length === 0 || current.first().id() !== parentId)
+              && cy.getElementById(parentId).length > 0) {
+            changed = true
+            el.move({ parent: parentId })
+          }
+        } else {
+          el.addClass('shared-node')
+          if (el.parent().length > 0) {
+            changed = true
+            el.move({ parent: null })
+          }
+        }
+      }
+      for (const e of edges) {
+        const el = cy.getElementById(e.id)
+        if (el.length === 0) continue
+        const a = assignment.primary.get(e.src)
+        const b = assignment.primary.get(e.dst)
+        const cross = a !== undefined && b !== undefined && a !== b ? 1 : 0
+        if (((el.data('crossSection') as number) ?? 0) !== cross) {
+          changed = true
+          el.data('crossSection', cross)
+        }
+      }
+    })
+
+    // The first time a section forms, shove it clear of the others.
+    for (const section of assignment.sections) {
+      if (sectionedIds.current.has(section.id)) continue
+      sectionedIds.current.add(section.id)
+      const parent = cy.getElementById(`section-${section.id}`)
+      if (parent.length === 0) continue
+      const fixed = cy
+        .nodes(':parent')
+        .filter((p) => p.id() !== parent.id())
+        .map((p) => p.boundingBox({}))
+      const { dx, dy } = escapeOverlap(parent.boundingBox({}), fixed, 140)
+      if (dx !== 0 || dy !== 0) {
+        changed = true
+        parent.descendants().forEach((n) => {
+          const p = n.position()
+          n.position({ x: p.x + dx, y: p.y + dy })
+        })
+      }
+    }
+
+    if (changed) {
+      layoutRef.current?.stop()
+      layoutRef.current = cy.layout(COLA_OPTIONS as unknown as cytoscape.LayoutOptions)
+      layoutRef.current.run()
+      recomputeMini()
+    }
+  }, [nodes, edges, incidents, recomputeMini])
+
+  // Selecting an incident lights its frame and flies the camera to it.
+  useEffect(() => {
+    const cy = cyRef.current
+    if (!cy) return
+    cy.nodes(':parent').removeClass('section-active')
+    if (!activeIncidentId) return
+    const parent = cy.getElementById(`section-${activeIncidentId}`)
+    if (parent.length === 0) return
+    parent.addClass('section-active')
+    if (lastFlownRef.current !== activeIncidentId) flyToSection(activeIncidentId)
+    recomputeMini()
+  }, [activeIncidentId, incidents, flyToSection, recomputeMini])
+
   // Update edge confidence data when scores change (score_update);
   // the stylesheet's color function repaints automatically.
   useEffect(() => {
@@ -662,7 +926,7 @@ export function GraphView({ nodes, edges, chain, timeWindow, focusedNodeId, onNo
     const cx = (bb.x1 + bb.x2) / 2
     const cy_ = (bb.y1 + bb.y2) / 2
     cy.batch(() => {
-      cy.nodes().forEach(node => {
+      cy.nodes(':childless').forEach(node => {
         const { x, y } = node.position()
         const dx = x - cx
         const dy = y - cy_
@@ -677,9 +941,33 @@ export function GraphView({ nodes, edges, chain, timeWindow, focusedNodeId, onNo
     layoutRef.current.run()
   }
 
+  // Minimap navigation: clicking open map pans the camera to that world
+  // point at the current zoom.
+  function handleMiniJump(x: number, y: number) {
+    const cy = cyRef.current
+    if (!cy) return
+    const zoom = cy.zoom()
+    cy.stop()
+    cy.animate({
+      pan: { x: cy.width() / 2 - x * zoom, y: cy.height() / 2 - y * zoom },
+      duration: 300,
+      easing: 'ease-in-out-cubic',
+    })
+  }
+
+  function handleMiniSection(incidentId: string) {
+    onIncidentSelectRef.current?.(incidentId)
+    // Fly even when the incident is already active, so the minimap always
+    // doubles as a "take me back to it" control.
+    flyToSection(incidentId)
+  }
+
   return (
     <div className="graph-view">
       <div ref={containerRef} className="graph-canvas" />
+      {mini && (
+        <Minimap data={mini} onSectionClick={handleMiniSection} onJump={handleMiniJump} />
+      )}
       <div className="graph-controls">
         <button className="graph-ctrl-btn" title="Zoom in" onClick={() => zoomBy(1.25)}>+</button>
         <button className="graph-ctrl-btn" title="Zoom out" onClick={() => zoomBy(0.8)}>&#8722;</button>
