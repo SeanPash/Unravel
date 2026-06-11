@@ -229,3 +229,58 @@ func itoa(i int) string {
 	}
 	return string(digits)
 }
+
+// awaitSignal returns the next buffered signal, failing if none arrives.
+func awaitSignal(t *testing.T, s *Scorer) Signal {
+	t.Helper()
+	select {
+	case sig := <-s.Signals():
+		return sig
+	case <-time.After(time.Second):
+		t.Fatal("expected a signal but none arrived")
+		return Signal{}
+	}
+}
+
+// Incident identity: a fresh component mints a new id; growing that component
+// keeps the same id; a disjoint component gets a different id; connecting two
+// components merges them into the earliest id.
+func TestResolveIncident_MintReuseMerge(t *testing.T) {
+	s := New(Config{Threshold: 0.0001})
+	g := graph.New()
+	t0 := time.Unix(1700000000, 0).UTC()
+
+	a := g.FindOrCreateNode(types.NodeKindProcess, "WS01:1", "winword.exe", map[string]any{"host": "WS01"})
+	b := g.FindOrCreateNode(types.NodeKindProcess, "WS01:2", "powershell.exe", map[string]any{"host": "WS01"})
+	e1 := g.AppendEdge(a, b, types.EdgeKindSpawned, t0, 1, "evt-1")
+	s.ScoreEdge(e1, g)
+	id1 := awaitSignal(t, s).IncidentID
+	if id1 == "" {
+		t.Fatal("expected an incident id on the first signal")
+	}
+
+	// Growth: same component, same id.
+	c := g.FindOrCreateNode(types.NodeKindProcess, "WS01:3", "lsass.exe", map[string]any{"host": "WS01"})
+	e2 := g.AppendEdge(b, c, types.EdgeKindDumpedMemoryOf, t0.Add(time.Second), 1, "evt-2")
+	s.ScoreEdge(e2, g)
+	if got := awaitSignal(t, s).IncidentID; got != id1 {
+		t.Errorf("growth incident id = %q, want same as %q", got, id1)
+	}
+
+	// Disjoint component on WS02: a different incident.
+	x := g.FindOrCreateNode(types.NodeKindProcess, "WS02:1", "winword.exe", map[string]any{"host": "WS02"})
+	y := g.FindOrCreateNode(types.NodeKindProcess, "WS02:2", "powershell.exe", map[string]any{"host": "WS02"})
+	e3 := g.AppendEdge(x, y, types.EdgeKindSpawned, t0.Add(2*time.Second), 1, "evt-3")
+	s.ScoreEdge(e3, g)
+	id2 := awaitSignal(t, s).IncidentID
+	if id2 == id1 {
+		t.Errorf("disjoint component reused incident id %q, want a new one", id1)
+	}
+
+	// Merge: connect the two components; the later incident is absorbed.
+	e4 := g.AppendEdge(c, x, types.EdgeKindSpawned, t0.Add(3*time.Second), 1, "evt-4")
+	s.ScoreEdge(e4, g)
+	if got := awaitSignal(t, s).IncidentID; got != id1 {
+		t.Errorf("merged component incident id = %q, want earliest %q", got, id1)
+	}
+}

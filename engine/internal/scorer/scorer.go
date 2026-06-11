@@ -6,6 +6,8 @@ package scorer
 
 import (
 	"math"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -27,9 +29,13 @@ type Config struct {
 // Signal is emitted on the Signals channel when a component's mean edge score
 // crosses Config.Threshold. HotNode is the destination of the highest-scoring
 // edge in the component, intended as the chain extractor's starting point.
+// IncidentID is a stable identifier for the connected component; it is minted
+// on the first signal from a component and preserved across subsequent growth
+// or merges.
 type Signal struct {
-	HotNode string
-	Mean    float64
+	HotNode    string
+	Mean       float64
+	IncidentID string
 }
 
 // Scorer holds the incremental state needed to score each new edge in O(1)
@@ -44,6 +50,9 @@ type Scorer struct {
 	nodeLastTS  map[string]int64
 	edgeScores  map[string]float64
 	authKinds   map[string]string
+
+	nodeIncident map[string]string // node id -> stable incident id
+	incidentSeq  int               // monotonic counter for minting ids
 
 	signals chan Signal
 }
@@ -64,13 +73,14 @@ func New(cfg Config) *Scorer {
 		cfg.Threshold = math.Inf(1)
 	}
 	return &Scorer{
-		cfg:         cfg,
-		spawnCounts: make(map[string]int),
-		authCounts:  make(map[string]int),
-		nodeLastTS:  make(map[string]int64),
-		edgeScores:  make(map[string]float64),
-		authKinds:   make(map[string]string),
-		signals:     make(chan Signal, cfg.SignalBuffer),
+		cfg:          cfg,
+		spawnCounts:  make(map[string]int),
+		authCounts:   make(map[string]int),
+		nodeLastTS:   make(map[string]int64),
+		edgeScores:   make(map[string]float64),
+		authKinds:    make(map[string]string),
+		nodeIncident: make(map[string]string),
+		signals:      make(chan Signal, cfg.SignalBuffer),
 	}
 }
 
@@ -99,10 +109,10 @@ func (s *Scorer) ScoreEdge(e *types.Edge, g *graph.Graph) float64 {
 	s.edgeScores[e.ID] = score
 	s.mu.Unlock()
 
-	mean, hot := s.componentMean(e, g)
+	mean, hot, incident := s.componentMean(e, g)
 	if mean > s.cfg.Threshold {
 		select {
-		case s.signals <- Signal{HotNode: hot, Mean: mean}:
+		case s.signals <- Signal{HotNode: hot, Mean: mean, IncidentID: incident}:
 		default:
 		}
 	}
@@ -218,7 +228,7 @@ func crossHost(src, dst *types.Node) bool {
 // componentMean returns the mean of the latest scores recorded for edges in
 // the connected component containing both endpoints of e, plus the hottest
 // node in that component (destination of the highest-scoring edge).
-func (s *Scorer) componentMean(start *types.Edge, g *graph.Graph) (float64, string) {
+func (s *Scorer) componentMean(start *types.Edge, g *graph.Graph) (float64, string, string) {
 	seenNodes := make(map[string]bool)
 	seenEdges := make(map[string]bool)
 	queue := []string{start.Src, start.Dst}
@@ -246,6 +256,7 @@ func (s *Scorer) componentMean(start *types.Edge, g *graph.Graph) (float64, stri
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	incident := s.resolveIncident(seenNodes)
 	var sum float64
 	var count int
 	var hotEdge string
@@ -273,7 +284,7 @@ func (s *Scorer) componentMean(start *types.Edge, g *graph.Graph) (float64, stri
 		}
 	}
 	if count == 0 {
-		return 0, start.Dst
+		return 0, start.Dst, incident
 	}
 	hotNode := start.Dst
 	if hotEdge != "" {
@@ -281,7 +292,56 @@ func (s *Scorer) componentMean(start *types.Edge, g *graph.Graph) (float64, stri
 			hotNode = e.Dst
 		}
 	}
-	return sum / float64(count), hotNode
+	return sum / float64(count), hotNode, incident
+}
+
+// resolveIncident assigns or reuses a stable incident id for a component's
+// members. A fresh component mints a new id; a component that already holds one
+// or more incidents reuses the earliest and absorbs the rest (a merge). Every
+// member is then (re)mapped to the chosen id. Caller must hold s.mu.
+func (s *Scorer) resolveIncident(members map[string]bool) string {
+	existing := make(map[string]bool)
+	for nid := range members {
+		if id, ok := s.nodeIncident[nid]; ok {
+			existing[id] = true
+		}
+	}
+	var chosen string
+	if len(existing) == 0 {
+		chosen = "inc-" + strconv.Itoa(s.incidentSeq)
+		s.incidentSeq++
+	} else {
+		chosen = earliestIncident(existing)
+	}
+	for nid := range members {
+		s.nodeIncident[nid] = chosen
+	}
+	return chosen
+}
+
+// earliestIncident returns the id with the smallest numeric suffix. Ids are
+// minted as "inc-<n>"; the lowest n is the earliest incident, which a merge
+// absorbs the others into.
+func earliestIncident(ids map[string]bool) string {
+	best := ""
+	bestN := 1 << 30
+	for id := range ids {
+		n := incidentNum(id)
+		if best == "" || n < bestN {
+			best, bestN = id, n
+		}
+	}
+	return best
+}
+
+// incidentNum parses the numeric suffix of an "inc-<n>" id. A malformed id maps
+// to a large number so it never wins the earliest comparison.
+func incidentNum(id string) int {
+	n, err := strconv.Atoi(strings.TrimPrefix(id, "inc-"))
+	if err != nil {
+		return 1 << 30
+	}
+	return n
 }
 
 func labelOf(n *types.Node) string {
