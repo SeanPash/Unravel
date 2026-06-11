@@ -25,7 +25,7 @@ export interface DetailTabsProps {
 
 const TABS: { id: DetailTab; label: string }[] = [
   { id: 'logs', label: 'Logs' },
-  { id: 'attack', label: 'ATT&CK' },
+  { id: 'attack', label: 'MITRE ATT&CK' },
   { id: 'intel', label: 'Threat Intel' },
 ]
 
