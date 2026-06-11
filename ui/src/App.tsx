@@ -5,10 +5,15 @@ import { GraphView } from './GraphView'
 import { NarrationPanel } from './NarrationPanel'
 import { TimeScrubber } from './TimeScrubber'
 import { DetailTabs, type DetailTab } from './DetailTabs'
+import { IncidentList } from './IncidentList'
 import { selectRelatedLogs } from './logFilter'
 import './App.css'
 
 const WS_URL = (import.meta.env.VITE_WS_URL as string | undefined) ?? `ws://${window.location.host}/ws`
+
+// Overlay messages without an incident_id (legacy fixtures, ai-off stubs) all
+// route to this single bucket so the UI still shows one incident for them.
+const LEGACY_INCIDENT_ID = 'inc-legacy'
 
 export interface IncidentState {
   id: string
@@ -24,16 +29,13 @@ export interface IncidentState {
 export interface AppState {
   nodes: Record<string, WsNode>
   edges: Record<string, WsEdge>
-  chain: ChainResultPayload | null
-  narration: NarrationPayload | null
   status: 'connecting' | 'live' | 'reconnecting'
-  awaitingNarration: boolean
   timeWindow: [number, number] | null
   logs: Record<string, LogEventPayload>
   focusedNodeId: string | null
-  threatIntel: ThreatIntelPayload | null
-  awaitingIntel: boolean
   activeTab: DetailTab
+  incidents: Record<string, IncidentState>
+  activeIncidentId: string | null
 }
 
 export type Action =
@@ -48,20 +50,42 @@ export type Action =
   | { type: 'focus_node'; payload: string | null }
   | { type: 'threat_intel'; payload: ThreatIntelPayload }
   | { type: 'set_tab'; payload: DetailTab }
+  | { type: 'select_incident'; payload: string }
 
 export const initialState: AppState = {
   nodes: {},
   edges: {},
-  chain: null,
-  narration: null,
   status: 'connecting',
-  awaitingNarration: false,
   timeWindow: null,
   logs: {},
   focusedNodeId: null,
-  threatIntel: null,
-  awaitingIntel: false,
   activeTab: 'logs',
+  incidents: {},
+  activeIncidentId: null,
+}
+
+function incidentIdOf(payload: { incident_id?: string }): string {
+  return payload.incident_id ?? LEGACY_INCIDENT_ID
+}
+
+function chainFirstSeen(chain: ChainResultPayload): number {
+  if (chain.steps.length === 0) return 0
+  return Math.min(...chain.steps.map((s) => s.ts))
+}
+
+// Returns the incident for id, or a blank placeholder when an out-of-order
+// narration/intel message arrives before its chain_result.
+function incidentOrPlaceholder(state: AppState, id: string): IncidentState {
+  return state.incidents[id] ?? {
+    id,
+    label: id,
+    chain: null,
+    narration: null,
+    threatIntel: null,
+    firstSeen: 0,
+    awaitingNarration: true,
+    awaitingIntel: true,
+  }
 }
 
 export function reducer(state: AppState, action: Action): AppState {
@@ -84,10 +108,49 @@ export function reducer(state: AppState, action: Action): AppState {
         },
       }
     }
-    case 'chain_result':
-      return { ...state, chain: action.payload, awaitingNarration: true, awaitingIntel: true }
-    case 'narration':
-      return { ...state, narration: action.payload, awaitingNarration: false }
+    case 'chain_result': {
+      const id = incidentIdOf(action.payload)
+      const prev = state.incidents[id]
+      const incident: IncidentState = {
+        id,
+        label: action.payload.incident_label ?? prev?.label ?? id,
+        chain: action.payload,
+        narration: prev?.narration ?? null,
+        threatIntel: prev?.threatIntel ?? null,
+        firstSeen: prev?.firstSeen ?? chainFirstSeen(action.payload),
+        awaitingNarration: true,
+        awaitingIntel: true,
+      }
+      return {
+        ...state,
+        incidents: { ...state.incidents, [id]: incident },
+        activeIncidentId: prev ? state.activeIncidentId : id,
+      }
+    }
+    case 'narration': {
+      const id = incidentIdOf(action.payload)
+      const base = incidentOrPlaceholder(state, id)
+      return {
+        ...state,
+        incidents: {
+          ...state.incidents,
+          [id]: { ...base, narration: action.payload, awaitingNarration: false },
+        },
+      }
+    }
+    case 'threat_intel': {
+      const id = incidentIdOf(action.payload)
+      const base = incidentOrPlaceholder(state, id)
+      return {
+        ...state,
+        incidents: {
+          ...state.incidents,
+          [id]: { ...base, threatIntel: action.payload, awaitingIntel: false },
+        },
+      }
+    }
+    case 'select_incident':
+      return { ...state, activeIncidentId: action.payload }
     case 'connected':
       return { ...state, status: 'live' }
     case 'disconnected':
@@ -98,8 +161,6 @@ export function reducer(state: AppState, action: Action): AppState {
       return { ...state, logs: { ...state.logs, [action.payload.event_id]: action.payload } }
     case 'focus_node':
       return { ...state, focusedNodeId: action.payload }
-    case 'threat_intel':
-      return { ...state, threatIntel: action.payload, awaitingIntel: false }
     case 'set_tab':
       return { ...state, activeTab: action.payload }
   }
@@ -127,12 +188,15 @@ export default function App() {
 
   const nodes = Object.values(state.nodes)
   const edges = Object.values(state.edges)
+  const incidents = Object.values(state.incidents)
+  const active = state.activeIncidentId ? state.incidents[state.activeIncidentId] ?? null : null
+  const activeChain = active?.chain ?? null
 
-  const edgeTimestamps = edges.map(e => e.ts)
+  const edgeTimestamps = edges.map((e) => e.ts)
   const minTs = edgeTimestamps.length > 0 ? Math.min(...edgeTimestamps) : 0
   const maxTs = edgeTimestamps.length > 0 ? Math.max(...edgeTimestamps) : 0
 
-  const relatedLogs = selectRelatedLogs(state.logs, edges, state.chain, state.focusedNodeId)
+  const relatedLogs = selectRelatedLogs(state.logs, edges, activeChain, state.focusedNodeId)
   const focusedLabel = state.focusedNodeId !== null
     ? state.nodes[state.focusedNodeId]?.label ?? state.focusedNodeId
     : null
@@ -150,13 +214,23 @@ export default function App() {
       </header>
       <main className="app-main">
         <div className="app-main-row">
+          <aside className="dash-panel incident-pane">
+            <div className="dash-panel-title">Incidents</div>
+            <div className="dash-panel-body">
+              <IncidentList
+                incidents={incidents}
+                activeIncidentId={state.activeIncidentId}
+                onSelect={(id) => dispatch({ type: 'select_incident', payload: id })}
+              />
+            </div>
+          </aside>
           <section className="dash-panel graph-pane">
             <div className="dash-panel-title">Provenance Graph</div>
             <div className="dash-panel-body">
               <GraphView
                 nodes={nodes}
                 edges={edges}
-                chain={state.chain}
+                chain={activeChain}
                 timeWindow={state.timeWindow}
                 focusedNodeId={state.focusedNodeId}
                 onNodeFocus={(id) => dispatch({ type: 'focus_node', payload: id })}
@@ -175,7 +249,10 @@ export default function App() {
           <aside className="dash-panel narration-pane">
             <div className="dash-panel-title">AI Narration</div>
             <div className="dash-panel-body narration-pane-body">
-              <NarrationPanel narration={state.narration} awaitingNarration={state.awaitingNarration} />
+              <NarrationPanel
+                narration={active?.narration ?? null}
+                awaitingNarration={active?.awaitingNarration ?? false}
+              />
             </div>
           </aside>
         </div>
@@ -184,12 +261,12 @@ export default function App() {
           onTabChange={(tab) => dispatch({ type: 'set_tab', payload: tab })}
           logs={relatedLogs}
           focusedLabel={focusedLabel}
-          hasChain={state.chain !== null}
+          hasChain={activeChain !== null}
           onClearFocus={() => dispatch({ type: 'focus_node', payload: null })}
-          chain={state.chain}
+          chain={activeChain}
           edges={edges}
-          intel={state.threatIntel}
-          awaitingIntel={state.awaitingIntel}
+          intel={active?.threatIntel ?? null}
+          awaitingIntel={active?.awaitingIntel ?? false}
           onNodeFocus={(id) => dispatch({ type: 'focus_node', payload: id })}
         />
       </main>
