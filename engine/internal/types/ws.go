@@ -37,12 +37,15 @@ type ChainStep struct {
 }
 
 type ChainResultPayload struct {
-	Confidence float64     `json:"confidence"`
-	Steps      []ChainStep `json:"steps"`
-	Tactics    []string    `json:"tactics,omitempty"`
+	IncidentID    string      `json:"incident_id,omitempty"`
+	IncidentLabel string      `json:"incident_label,omitempty"`
+	Confidence    float64     `json:"confidence"`
+	Steps         []ChainStep `json:"steps"`
+	Tactics       []string    `json:"tactics,omitempty"`
 }
 
 type NarrationPayload struct {
+	IncidentID string   `json:"incident_id,omitempty"`
 	Text       string   `json:"text"`
 	Hypotheses []string `json:"hypotheses"`
 	Actions    []string `json:"actions"`
@@ -60,6 +63,7 @@ type LogEventPayload struct {
 // ThreatIntelPayload is the threat-intel agent's enrichment of a chain. Status
 // is "ok" or "error". Techniques are deduplicated by technique ID.
 type ThreatIntelPayload struct {
+	IncidentID string                 `json:"incident_id,omitempty"`
 	Status     string                 `json:"status"`
 	Summary    string                 `json:"summary"`
 	Techniques []ThreatIntelTechnique `json:"techniques"`
