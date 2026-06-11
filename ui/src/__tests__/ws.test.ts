@@ -7,6 +7,7 @@ import {
   type ChainResultPayload,
   type NarrationPayload,
   type LogEventPayload,
+  type ThreatIntelPayload,
 } from '../ws'
 
 // Fake WebSocket - no DOM, no real network.
@@ -54,23 +55,27 @@ function makeHandlers(): MessageHandlers & {
   chainResults: ChainResultPayload[]
   narrations: NarrationPayload[]
   logEvents: LogEventPayload[]
+  threatIntels: ThreatIntelPayload[]
 } {
   const graphUpdates: GraphUpdatePayload[] = []
   const scoreUpdates: ScoreUpdatePayload[] = []
   const chainResults: ChainResultPayload[] = []
   const narrations: NarrationPayload[] = []
   const logEvents: LogEventPayload[] = []
+  const threatIntels: ThreatIntelPayload[] = []
   return {
     graphUpdates,
     scoreUpdates,
     chainResults,
     narrations,
     logEvents,
+    threatIntels,
     onGraphUpdate(p) { graphUpdates.push(p) },
     onScoreUpdate(p) { scoreUpdates.push(p) },
     onChainResult(p) { chainResults.push(p) },
     onNarration(p) { narrations.push(p) },
     onLogEvent(p) { logEvents.push(p) },
+    onThreatIntel(p) { threatIntels.push(p) },
   }
 }
 
@@ -191,6 +196,19 @@ describe('EngineSocket message dispatch', () => {
     expect(handlers.narrations).toHaveLength(0)
 
     sock.close()
+  })
+
+  it('calls onThreatIntel with the correct payload', () => {
+    const [factory, getInstances] = fakeFactory()
+    const handlers = makeHandlers()
+    const sock = new EngineSocket('ws://localhost:8080/ws', handlers, factory)
+    sock.connect()
+    getInstances()[0].send({
+      type: 'threat_intel',
+      payload: { status: 'ok', summary: 's', techniques: [], cve_matches: [] },
+    })
+    expect(handlers.threatIntels.length).toBe(1)
+    expect(handlers.threatIntels[0].summary).toBe('s')
   })
 })
 

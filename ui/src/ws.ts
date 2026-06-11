@@ -33,11 +33,37 @@ export interface ChainStep {
   description: string
   confidence: number
   ts: number
+  technique_id?: string
+  technique_name?: string
+  tactic?: string
 }
 
 export interface ChainResultPayload {
   confidence: number
   steps: ChainStep[]
+  tactics?: string[]
+}
+
+export interface ThreatIntelTechnique {
+  id: string
+  name: string
+  groups: string[]
+  software: string[]
+  mitigations: string[]
+}
+
+export interface CVEMatch {
+  id: string
+  summary: string
+  in_kev: boolean
+  severity?: string
+}
+
+export interface ThreatIntelPayload {
+  status: string
+  summary: string
+  techniques: ThreatIntelTechnique[]
+  cve_matches?: CVEMatch[]
 }
 
 export interface NarrationPayload {
@@ -59,6 +85,7 @@ export interface MessageHandlers {
   onChainResult(payload: ChainResultPayload): void
   onNarration(payload: NarrationPayload): void
   onLogEvent?(payload: LogEventPayload): void
+  onThreatIntel?(payload: ThreatIntelPayload): void
   onOpen?(): void
   onClose?(): void
 }
@@ -152,6 +179,9 @@ export class EngineSocket {
         break
       case 'log_event':
         this.handlers.onLogEvent?.(payload as LogEventPayload)
+        break
+      case 'threat_intel':
+        this.handlers.onThreatIntel?.(payload as ThreatIntelPayload)
         break
       default:
         console.warn('[EngineSocket] unknown message type:', type)
