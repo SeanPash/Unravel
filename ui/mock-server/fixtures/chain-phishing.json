@@ -125,12 +125,13 @@
     "payload": {
       "confidence": 0.91,
       "steps": [
-        { "event_id": "evt-001", "description": "WINWORD.EXE spawned powershell.exe on WS01", "confidence": 0.91, "ts": 1749100030 },
-        { "event_id": "evt-002", "description": "powershell.exe accessed lsass.exe memory (credential dump)", "confidence": 0.88, "ts": 1749100060 },
-        { "event_id": "evt-003", "description": "powershell.exe accessed NORTHPOLE\\Administrator credential material", "confidence": 0.85, "ts": 1749100075 },
-        { "event_id": "evt-004", "description": "NORTHPOLE\\Administrator authenticated to DC01 via Kerberos ticket", "confidence": 0.93, "ts": 1749100090 },
-        { "event_id": "evt-005", "description": "Domain admin logon to DC01 confirmed", "confidence": 0.96, "ts": 1749100120 }
-      ]
+        { "event_id": "evt-001", "description": "WINWORD.EXE spawned powershell.exe on WS01", "confidence": 0.91, "ts": 1749100030, "technique_id": "T1566.001", "technique_name": "Spearphishing Attachment", "tactic": "Initial Access" },
+        { "event_id": "evt-002", "description": "powershell.exe accessed lsass.exe memory (credential dump)", "confidence": 0.88, "ts": 1749100060, "technique_id": "T1003.001", "technique_name": "LSASS Memory", "tactic": "Credential Access" },
+        { "event_id": "evt-003", "description": "powershell.exe accessed NORTHPOLE\\Administrator credential material", "confidence": 0.85, "ts": 1749100075, "technique_id": "T1003.001", "technique_name": "LSASS Memory", "tactic": "Credential Access" },
+        { "event_id": "evt-004", "description": "NORTHPOLE\\Administrator authenticated to DC01 via Kerberos ticket", "confidence": 0.93, "ts": 1749100090, "technique_id": "T1550.003", "technique_name": "Pass the Ticket", "tactic": "Lateral Movement" },
+        { "event_id": "evt-005", "description": "Domain admin logon to DC01 confirmed", "confidence": 0.96, "ts": 1749100120, "technique_id": "T1078.002", "technique_name": "Domain Accounts", "tactic": "Privilege Escalation" }
+      ],
+      "tactics": ["Initial Access", "Credential Access", "Lateral Movement", "Privilege Escalation"]
     }
   },
   {
@@ -146,6 +147,22 @@
         "Reset credentials for NORTHPOLE\\Administrator and all accounts with recent Kerberos activity from WS01",
         "Search for lateral movement originating from DC01 after timestamp 1749100090",
         "Revoke all active Kerberos tickets issued to WS01 in the affected window"
+      ]
+    }
+  },
+  {
+    "type": "threat_intel",
+    "payload": {
+      "status": "ok",
+      "summary": "This chain matches credential-theft tradecraft attributed to APT29 and Wizard Spider: LSASS dumping (Mimikatz) followed by pass-the-ticket to a domain controller. Priority remediation: enable LSA Protection and Credential Guard on WS01, reset the krbtgt password twice, and force a domain admin credential reset.",
+      "techniques": [
+        { "id": "T1566.001", "name": "Spearphishing Attachment", "groups": ["APT28", "APT29"], "software": ["Emotet", "TrickBot"], "mitigations": ["Block macros from internet-sourced documents", "User awareness training"] },
+        { "id": "T1003.001", "name": "LSASS Memory", "groups": ["APT29", "Wizard Spider"], "software": ["Mimikatz", "gsecdump"], "mitigations": ["Enable LSA Protection (RunAsPPL)", "Enable Credential Guard"] },
+        { "id": "T1550.003", "name": "Pass the Ticket", "groups": ["APT29"], "software": ["Mimikatz", "Rubeus"], "mitigations": ["Reset krbtgt password twice", "Monitor anomalous Kerberos requests"] },
+        { "id": "T1078.002", "name": "Domain Accounts", "groups": ["APT29", "Wizard Spider"], "software": [], "mitigations": ["Require MFA for privileged logons", "Alert on domain admin logons to unexpected hosts"] }
+      ],
+      "cve_matches": [
+        { "id": "CVE-2020-1472", "summary": "Netlogon elevation of privilege (Zerologon) enabling DC takeover.", "in_kev": true, "severity": "CRITICAL" }
       ]
     }
   }
