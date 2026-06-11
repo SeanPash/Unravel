@@ -937,6 +937,50 @@
   border-color: rgba(240, 180, 41, 0.4);
 }
 
+/* Icon transport controls: square buttons that center their glyph. Placed
+   after the text-button rules so they override the text padding/sizing. */
+.timeline-btn-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 22px;
+  padding: 0;
+  transition: color 0.12s ease, border-color 0.12s ease, background 0.12s ease;
+}
+
+.timeline-btn-icon svg {
+  display: block;
+}
+
+.timeline-btn-icon:not(:disabled):hover {
+  color: var(--text-primary);
+  border-color: var(--text-faint);
+}
+
+/* Live: a dot that inherits the button color (amber when active) and pulses a
+   broadcast ring only while live, so the control reads as "now playing". */
+.timeline-live-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.timeline-live-btn.active {
+  animation: live-pulse 1.8s ease-out infinite;
+}
+
+@keyframes live-pulse {
+  0% { box-shadow: 0 0 0 0 rgba(240, 180, 41, 0.4); }
+  70% { box-shadow: 0 0 0 5px rgba(240, 180, 41, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(240, 180, 41, 0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .timeline-live-btn.active { animation: none; }
+}
+
 /* Marker hover tooltip */
 .timeline-tooltip {
   position: fixed;

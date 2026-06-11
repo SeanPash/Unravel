@@ -26,34 +26,34 @@ describe('TimeScrubber', () => {
     const { container } = render(
       <TimeScrubber minTs={100} maxTs={300} window={null} edges={edges} onChange={() => {}} />
     )
-    expect(container.querySelectorAll('.scrubber-tick').length).toBe(3)
+    expect(container.querySelectorAll('.timeline-marker').length).toBe(3)
   })
 
   it('advances to the next event timestamp on Next', () => {
     const onChange = vi.fn()
-    const { getByText } = render(
+    const { getByLabelText } = render(
       <TimeScrubber minTs={100} maxTs={300} window={[100, 100]} edges={edges} onChange={onChange} />
     )
-    fireEvent.click(getByText('Next'))
+    fireEvent.click(getByLabelText('Next event'))
     expect(onChange).toHaveBeenCalledWith([100, 200])
   })
 
   it('re-enters Live when Next is pressed at the latest event', () => {
     const onChange = vi.fn()
-    const { getByText } = render(
+    const { getByLabelText } = render(
       <TimeScrubber minTs={100} maxTs={300} window={null} edges={edges} onChange={onChange} />
     )
-    fireEvent.click(getByText('Next'))
+    fireEvent.click(getByLabelText('Next event'))
     expect(onChange).toHaveBeenCalledWith(null)
   })
 
   it('auto-advances while playing and clears the interval on unmount', () => {
     vi.useFakeTimers()
     const onChange = vi.fn()
-    const { getByText, unmount } = render(
+    const { getByLabelText, unmount } = render(
       <TimeScrubber minTs={100} maxTs={300} window={[100, 100]} edges={edges} onChange={onChange} />
     )
-    fireEvent.click(getByText('Play'))
+    fireEvent.click(getByLabelText('Play'))
     act(() => { vi.advanceTimersByTime(1200) })
     expect(onChange).toHaveBeenCalledWith([100, 200])
 
@@ -64,10 +64,10 @@ describe('TimeScrubber', () => {
   })
 
   it('disables navigation when there are fewer than two events', () => {
-    const { getByText } = render(
+    const { getByLabelText } = render(
       <TimeScrubber minTs={100} maxTs={100} window={null} edges={[edge('e1', 100)]} onChange={() => {}} />
     )
-    expect((getByText('Next') as HTMLButtonElement).disabled).toBe(true)
-    expect((getByText('Play') as HTMLButtonElement).disabled).toBe(true)
+    expect((getByLabelText('Next event') as HTMLButtonElement).disabled).toBe(true)
+    expect((getByLabelText('Play') as HTMLButtonElement).disabled).toBe(true)
   })
 })

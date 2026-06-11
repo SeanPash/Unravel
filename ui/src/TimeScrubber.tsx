@@ -42,6 +42,46 @@ function formatTs(ts: number): string {
 // Auto-advance dwell per event during playback (ms).
 const PLAY_INTERVAL_MS = 1200
 
+// Transport-control glyphs. Inline SVG (no icon dependency) drawn in
+// currentColor so they inherit the button's text color, including the amber
+// pressed/active states. aria-hidden because each button carries its own label.
+const ICON = 13
+
+function IconPrev() {
+  return (
+    <svg width={ICON} height={ICON} viewBox="0 0 16 16" fill="currentColor" aria-hidden="true" focusable="false">
+      <rect x="3" y="3.5" width="1.7" height="9" rx="0.6" />
+      <path d="M13 3.5v9L6 8z" />
+    </svg>
+  )
+}
+
+function IconNext() {
+  return (
+    <svg width={ICON} height={ICON} viewBox="0 0 16 16" fill="currentColor" aria-hidden="true" focusable="false">
+      <path d="M3 3.5v9L10 8z" />
+      <rect x="11.3" y="3.5" width="1.7" height="9" rx="0.6" />
+    </svg>
+  )
+}
+
+function IconPlay() {
+  return (
+    <svg width={ICON} height={ICON} viewBox="0 0 16 16" fill="currentColor" aria-hidden="true" focusable="false">
+      <path d="M4 3l9 5-9 5z" />
+    </svg>
+  )
+}
+
+function IconPause() {
+  return (
+    <svg width={ICON} height={ICON} viewBox="0 0 16 16" fill="currentColor" aria-hidden="true" focusable="false">
+      <rect x="4" y="3" width="2.6" height="10" rx="0.7" />
+      <rect x="9.4" y="3" width="2.6" height="10" rx="0.7" />
+    </svg>
+  )
+}
+
 interface TickTooltip { ts: number; x: number; y: number }
 
 export function TimeScrubber({ minTs, maxTs, window, onChange, edges, chain, onEventFocus, jump, activePhaseName }: TimeScrubberProps) {
@@ -360,36 +400,41 @@ export function TimeScrubber({ minTs, maxTs, window, onChange, edges, chain, onE
         <span className="timeline-label">{formatTs(dispMin)}</span>
         <div className="timeline-controls">
           <button
-            className="timeline-btn"
+            className="timeline-btn timeline-btn-icon"
             onClick={goPrev}
             disabled={navDisabled}
             aria-label="Previous event"
+            title="Previous event"
           >
-            Prev
+            <IconPrev />
           </button>
           <button
-            className="timeline-btn"
+            className="timeline-btn timeline-btn-icon"
             onClick={togglePlay}
             disabled={navDisabled}
             aria-pressed={playing}
             aria-label={playing ? 'Pause' : 'Play'}
+            title={playing ? 'Pause' : 'Play'}
           >
-            {playing ? 'Pause' : 'Play'}
+            {playing ? <IconPause /> : <IconPlay />}
           </button>
           <button
-            className="timeline-btn"
+            className="timeline-btn timeline-btn-icon"
             onClick={goNext}
             disabled={navDisabled}
             aria-label="Next event"
+            title="Next event"
           >
-            Next
+            <IconNext />
           </button>
           <button
-            className={`timeline-live-btn${isLive ? ' active' : ''}`}
+            className={`timeline-live-btn timeline-btn-icon${isLive ? ' active' : ''}`}
             onClick={handleLive}
             aria-pressed={isLive}
+            aria-label="Live"
+            title="Live"
           >
-            Live
+            <span className="timeline-live-dot" aria-hidden="true" />
           </button>
         </div>
         <span className="timeline-label">{formatTs(dispMax)}</span>
