@@ -112,6 +112,95 @@ func TestPipelineProducesChainResultAndNarration(t *testing.T) {
 	<-done
 }
 
+type stubIntelAgent struct{ calls int }
+
+func (s *stubIntelAgent) Enrich(_ context.Context, _ types.ChainResultPayload) (types.ThreatIntelPayload, error) {
+	s.calls++
+	return types.ThreatIntelPayload{Status: "ok", Summary: "x", Techniques: []types.ThreatIntelTechnique{}}, nil
+}
+
+func TestPipelineBroadcastsThreatIntel(t *testing.T) {
+	t.Parallel()
+	base := time.Date(2026, 6, 5, 19, 30, 0, 0, time.UTC)
+	events := []splunk.RawEvent{
+		spawnEvent(base, "WS01", 4000, "C:\\Windows\\explorer.exe", 4120, "C:\\Office\\WINWORD.EXE"),
+		spawnEvent(base.Add(5*time.Second), "WS01", 4120, "C:\\Office\\WINWORD.EXE", 4880, "C:\\Windows\\powershell.exe"),
+		spawnEvent(base.Add(10*time.Second), "WS01", 4880, "C:\\Windows\\powershell.exe", 5001, "C:\\Tools\\mimikatz.exe"),
+		spawnEvent(base.Add(15*time.Second), "WS01", 5001, "C:\\Tools\\mimikatz.exe", 5002, "C:\\Windows\\wmic.exe"),
+		spawnEvent(base.Add(20*time.Second), "WS01", 5002, "C:\\Windows\\wmic.exe", 5003, "C:\\Tools\\psexec.exe"),
+	}
+	src := splunk.NewMockFromEntries(events)
+	src.Start()
+
+	g := graph.New()
+	sc := scorer.New(scorer.Config{Threshold: 0.01})
+	bcast := api.NewBroadcaster()
+	defer bcast.Close()
+	sub := bcast.Subscribe()
+
+	agent := &stubIntelAgent{}
+	p, err := New(Config{
+		Source:         src,
+		Graph:          g,
+		Scorer:         sc,
+		Narrator:       ai.NewStub(),
+		Broadcaster:    bcast,
+		IntelAgent:     agent,
+		SignalDebounce: 100 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- p.Run(ctx) }()
+
+	gotIntel := false
+	deadline := time.After(3 * time.Second)
+	for !gotIntel {
+		select {
+		case msg, ok := <-sub.Out():
+			if !ok {
+				t.Fatal("subscriber closed before threat_intel")
+			}
+			if msg.Type == types.MsgTypeThreatIntel {
+				gotIntel = true
+			}
+		case <-deadline:
+			t.Fatal("timed out waiting for threat_intel message")
+		}
+	}
+
+	cancel()
+	<-done
+
+	// Drain anything still buffered to confirm exactly one threat_intel was sent.
+	intelCount := 1
+	for {
+		select {
+		case msg, ok := <-sub.Out():
+			if !ok {
+				goto checks
+			}
+			if msg.Type == types.MsgTypeThreatIntel {
+				intelCount++
+			}
+		default:
+			goto checks
+		}
+	}
+
+checks:
+	if intelCount != 1 {
+		t.Errorf("threat_intel count = %d, want 1", intelCount)
+	}
+	if agent.calls != 1 {
+		t.Errorf("intel agent calls = %d, want 1", agent.calls)
+	}
+}
+
 func TestPipelineBroadcastsLogEvents(t *testing.T) {
 	t.Parallel()
 	base := time.Date(2026, 6, 5, 19, 30, 0, 0, time.UTC)

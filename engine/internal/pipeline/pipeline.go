@@ -44,6 +44,13 @@ type Config struct {
 	// NarrationTimeout caps each LLM call. Defaults to 20s.
 	NarrationTimeout time.Duration
 
+	// IntelAgent runs concurrently with the narrator on each extracted chain.
+	// When nil, no threat_intel message is produced.
+	IntelAgent ai.ThreatIntelAgent
+
+	// IntelTimeout caps the threat-intel agent call. Defaults to 30s.
+	IntelTimeout time.Duration
+
 	// SignalDebounce coalesces a burst of scorer signals into a single chain
 	// extraction. After a signal arrives, the pipeline waits this long for
 	// another signal; only when the burst goes quiet does it walk the graph.
@@ -67,6 +74,9 @@ func New(cfg Config) (*Pipeline, error) {
 	}
 	if cfg.NarrationTimeout <= 0 {
 		cfg.NarrationTimeout = 20 * time.Second
+	}
+	if cfg.IntelTimeout <= 0 {
+		cfg.IntelTimeout = 30 * time.Second
 	}
 	if cfg.SignalDebounce <= 0 {
 		cfg.SignalDebounce = 250 * time.Millisecond
@@ -226,6 +236,23 @@ func (p *Pipeline) handleSignal(ctx context.Context, sig scorer.Signal) {
 		hcancel()
 	}
 
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		p.runNarration(ctx, result)
+	}()
+	if p.cfg.IntelAgent != nil {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			p.runIntel(ctx, result)
+		}()
+	}
+	wg.Wait()
+}
+
+func (p *Pipeline) runNarration(ctx context.Context, result types.ChainResultPayload) {
 	nctx, cancel := context.WithTimeout(ctx, p.cfg.NarrationTimeout)
 	defer cancel()
 	narr, err := p.cfg.Narrator.Narrate(nctx, result)
@@ -233,9 +260,25 @@ func (p *Pipeline) handleSignal(ctx context.Context, sig scorer.Signal) {
 		p.cfg.Logger.Warn("narrate", "err", err)
 		return
 	}
-	narrMsg, err := types.NewMessage(types.MsgTypeNarration, narr)
-	if err == nil {
-		p.cfg.Broadcaster.Send(narrMsg)
+	if msg, err := types.NewMessage(types.MsgTypeNarration, narr); err == nil {
+		p.cfg.Broadcaster.Send(msg)
+	}
+}
+
+func (p *Pipeline) runIntel(ctx context.Context, result types.ChainResultPayload) {
+	ictx, cancel := context.WithTimeout(ctx, p.cfg.IntelTimeout)
+	defer cancel()
+	payload, err := p.cfg.IntelAgent.Enrich(ictx, result)
+	if err != nil {
+		p.cfg.Logger.Warn("threat intel", "err", err)
+		payload = types.ThreatIntelPayload{
+			Status:     "error",
+			Summary:    "Threat intel enrichment failed.",
+			Techniques: []types.ThreatIntelTechnique{},
+		}
+	}
+	if msg, err := types.NewMessage(types.MsgTypeThreatIntel, payload); err == nil {
+		p.cfg.Broadcaster.Send(msg)
 	}
 }
 
