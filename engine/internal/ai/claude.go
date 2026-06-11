@@ -124,21 +124,27 @@ func (c *ClaudeNarrator) Narrate(ctx context.Context, chain types.ChainResultPay
 }
 
 func (c *ClaudeNarrator) doRequest(ctx context.Context, reqBody claudeRequest) (claudeResponse, error) {
+	return postMessages(ctx, c.cfg.HTTPClient, c.cfg.BaseURL, c.cfg.APIKey, reqBody)
+}
+
+// postMessages issues one Anthropic Messages request. Shared by ClaudeNarrator
+// and ClaudeIntelAgent so the HTTP plumbing lives in one place.
+func postMessages(ctx context.Context, httpClient *http.Client, baseURL, apiKey string, reqBody claudeRequest) (claudeResponse, error) {
 	raw, err := json.Marshal(reqBody)
 	if err != nil {
 		return claudeResponse{}, fmt.Errorf("marshal request: %w", err)
 	}
 
-	endpoint := strings.TrimRight(c.cfg.BaseURL, "/") + "/v1/messages"
+	endpoint := strings.TrimRight(baseURL, "/") + "/v1/messages"
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(raw))
 	if err != nil {
 		return claudeResponse{}, err
 	}
-	req.Header.Set("x-api-key", c.cfg.APIKey)
+	req.Header.Set("x-api-key", apiKey)
 	req.Header.Set("anthropic-version", "2023-06-01")
 	req.Header.Set("content-type", "application/json")
 
-	resp, err := c.cfg.HTTPClient.Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return claudeResponse{}, fmt.Errorf("claude request: %w", err)
 	}
