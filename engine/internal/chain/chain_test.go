@@ -145,3 +145,46 @@ func contains(s, sub string) bool {
 	}
 	return false
 }
+
+// nodeRegistry maps a short test-local ID to the node returned by
+// FindOrCreateNode. This bridges the plan's addNode/addEdge helper API (which
+// use caller-chosen short IDs) with graph.Graph's internal "proc-<key>" IDs.
+type nodeRegistry map[string]*types.Node
+
+func addNode(t *testing.T, g *graph.Graph, reg nodeRegistry, id string, kind types.NodeKind, label string) {
+	t.Helper()
+	reg[id] = g.FindOrCreateNode(kind, id, label, nil)
+}
+
+func addEdge(t *testing.T, g *graph.Graph, reg nodeRegistry, eventID, srcID, dstID string, kind types.EdgeKind, ts int64, conf float64) {
+	t.Helper()
+	g.AppendEdge(reg[srcID], reg[dstID], kind, time.Unix(ts, 0).UTC(), conf, eventID)
+}
+
+func TestExtractAnnotatesTechniquesAndTactics(t *testing.T) {
+	g := graph.New()
+	reg := nodeRegistry{}
+	// Build: winword --spawned--> powershell --dumped_memory_of--> lsass
+	addNode(t, g, reg, "p-word", types.NodeKindProcess, "WINWORD.EXE")
+	addNode(t, g, reg, "p-ps", types.NodeKindProcess, "powershell.exe")
+	addNode(t, g, reg, "p-lsass", types.NodeKindProcess, "lsass.exe")
+	addEdge(t, g, reg, "e1", "p-word", "p-ps", types.EdgeKindSpawned, 1, 0.7)
+	addEdge(t, g, reg, "e2", "p-ps", "p-lsass", types.EdgeKindDumpedMemoryOf, 2, 0.9)
+
+	score := func(id string) float64 { return 1.0 }
+	result := Extract(g, score, reg["p-lsass"].ID)
+
+	if len(result.Steps) != 2 {
+		t.Fatalf("steps = %d, want 2", len(result.Steps))
+	}
+	if result.Steps[0].TechniqueID != "T1566.001" {
+		t.Errorf("step0 technique = %q, want T1566.001", result.Steps[0].TechniqueID)
+	}
+	if result.Steps[1].TechniqueID != "T1003.001" {
+		t.Errorf("step1 technique = %q, want T1003.001", result.Steps[1].TechniqueID)
+	}
+	wantTactics := []string{"Initial Access", "Credential Access"}
+	if len(result.Tactics) != 2 || result.Tactics[0] != wantTactics[0] || result.Tactics[1] != wantTactics[1] {
+		t.Errorf("tactics = %v, want %v", result.Tactics, wantTactics)
+	}
+}

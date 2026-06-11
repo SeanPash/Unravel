@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/luigifernandez/unravel/engine/internal/graph"
+	"github.com/luigifernandez/unravel/engine/internal/mitre"
 	"github.com/luigifernandez/unravel/engine/internal/types"
 )
 
@@ -34,11 +35,15 @@ func Extract(g *graph.Graph, score ScoreFn, hotNodeID string) types.ChainResultP
 		}
 		src := g.Node(best.Src)
 		dst := g.Node(best.Dst)
+		tech, _ := mitre.Classify(string(best.Kind), labelOf(src), labelOf(dst))
 		reverse = append(reverse, types.ChainStep{
-			EventID:     best.SourceEventID,
-			Description: describe(src, dst, best.Kind),
-			Confidence:  best.Confidence,
-			TS:          best.TS,
+			EventID:       best.SourceEventID,
+			Description:   describe(src, dst, best.Kind),
+			Confidence:    best.Confidence,
+			TS:            best.TS,
+			TechniqueID:   tech.ID,
+			TechniqueName: tech.Name,
+			Tactic:        tech.Tactic,
 		})
 		visited[best.Src] = true
 		current = best.Src
@@ -51,6 +56,7 @@ func Extract(g *graph.Graph, score ScoreFn, hotNodeID string) types.ChainResultP
 	return types.ChainResultPayload{
 		Confidence: geomMean(steps),
 		Steps:      steps,
+		Tactics:    distinctTactics(steps),
 	}
 }
 
@@ -91,4 +97,20 @@ func geomMean(steps []types.ChainStep) float64 {
 		product *= s.Confidence
 	}
 	return math.Pow(product, 1.0/float64(len(steps)))
+}
+
+// distinctTactics returns the tactics present across steps, in first-seen
+// (chronological) order, skipping unmapped steps. This drives the UI ribbon's
+// left-to-right kill-chain ordering.
+func distinctTactics(steps []types.ChainStep) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, s := range steps {
+		if s.Tactic == "" || seen[s.Tactic] {
+			continue
+		}
+		seen[s.Tactic] = true
+		out = append(out, s.Tactic)
+	}
+	return out
 }
