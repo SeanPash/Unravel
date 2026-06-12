@@ -546,6 +546,8 @@ export function GraphView({
   const lastFlownRef = useRef<string | null>(null)
   const onNodeFocusRef = useRef(onNodeFocus)
   useEffect(() => { onNodeFocusRef.current = onNodeFocus })
+  const focusedNodeIdRef = useRef(focusedNodeId)
+  useEffect(() => { focusedNodeIdRef.current = focusedNodeId })
   const onIncidentSelectRef = useRef(onIncidentSelect)
   useEffect(() => { onIncidentSelectRef.current = onIncidentSelect })
   const activeIncidentIdRef = useRef(activeIncidentId)
@@ -712,6 +714,12 @@ export function GraphView({
     cy.on('tap', 'node', (e) => {
       const target = e.target as cytoscape.NodeSingular
       clearPinnedEdge()
+      // Re-tapping the focused node releases it, mirroring a second click on
+      // a phase card: logs and timeline drop back to Live.
+      if (focusedNodeIdRef.current !== null && focusedNodeIdRef.current === target.id()) {
+        onNodeFocusRef.current?.(null)
+        return
+      }
       onNodeFocusRef.current?.(target.id())
       // Tapping into another incident's cluster also makes that incident
       // active, so every panel follows the user across the map. The camera

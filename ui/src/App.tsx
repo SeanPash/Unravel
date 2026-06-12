@@ -200,8 +200,20 @@ export function reducer(state: AppState, action: Action): AppState {
       return { ...state, timeWindow: action.payload }
     case 'log_event':
       return { ...state, logs: { ...state.logs, [action.payload.event_id]: action.payload } }
-    case 'focus_node':
+    case 'focus_node': {
+      if (action.payload === null) {
+        // Releasing the node focus returns logs and timeline to Live, the
+        // same resting state a deselected phase card lands on. An active
+        // phase or technique focus keeps its window.
+        return {
+          ...state,
+          focusedNodeId: null,
+          focusedEventId: null,
+          timeWindow: state.activeFocusId === null ? null : state.timeWindow,
+        }
+      }
       return { ...state, focusedNodeId: action.payload, focusedEventId: null }
+    }
     case 'focus_event':
       return { ...state, focusedEventId: action.payload, focusedNodeId: null }
     case 'jump_to_ts':

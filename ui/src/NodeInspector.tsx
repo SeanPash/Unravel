@@ -83,9 +83,12 @@ export function NodeInspector({
           <span className={`inspector-kind inspector-kind-${node.kind.toLowerCase()}`}>{node.kind}</span>
           <span className="inspector-name" title={node.label}>{shortenNodeLabel(node.label)}</span>
         </div>
-        <button type="button" className="inspector-close" aria-label="Close node details" onClick={onClose}>
-          <X size={12} />
-        </button>
+        <span className="inspector-head-right">
+          {focused && <span className="inspector-focus-badge">Focused</span>}
+          <button type="button" className="inspector-close" aria-label="Close node details" onClick={onClose}>
+            <X size={12} />
+          </button>
+        </span>
       </header>
 
       <section className="inspector-section">
