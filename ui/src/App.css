@@ -974,14 +974,12 @@
 
 /* ─── Node inspector ──────────────────────────────────────────────────── */
 
-/* Investigation drawer for the focused node, floating beside the camera
-   controls. Same glass treatment as the minimap so the graph overlays read
-   as one family. */
+/* Investigation drawer for a focused node. Draggable by its header, so the
+   analyst can pin several side by side; left/top and z-index are set inline
+   by the view. Same glass treatment as the minimap so the graph overlays
+   read as one family. */
 .node-inspector {
   position: absolute;
-  z-index: 50;
-  top: var(--space-3);
-  right: 52px;
   width: 270px;
   max-height: calc(100% - 70px);
   overflow-y: auto;
@@ -994,6 +992,11 @@
   backdrop-filter: blur(5px);
 }
 
+/* The accent marks which pinned panel is the node driving the Logs tab. */
+.node-inspector-focused {
+  border-color: rgba(220, 78, 65, 0.45);
+}
+
 .inspector-head {
   display: flex;
   align-items: center;
@@ -1001,6 +1004,13 @@
   gap: var(--space-2);
   padding: 10px 12px;
   border-bottom: 1px solid var(--border-subtle);
+  cursor: grab;
+  user-select: none;
+  touch-action: none;
+}
+
+.inspector-head:active {
+  cursor: grabbing;
 }
 
 .inspector-title {

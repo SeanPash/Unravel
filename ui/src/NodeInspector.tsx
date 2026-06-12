@@ -16,6 +16,13 @@ export interface NodeInspectorProps {
   onNodeFocus: (nodeId: string) => void
   onPhaseSelect: (phase: AttackPhase) => void
   onTechniqueSelect: (techniqueId: string) => void
+  // Floating-panel plumbing supplied by the host: absolute position and
+  // stacking via style, drag handling on the header, bring-to-front on any
+  // press, and the focused accent for the node driving the Logs tab.
+  style?: React.CSSProperties
+  headerProps?: React.HTMLAttributes<HTMLElement>
+  onPanelPointerDown?: () => void
+  focused?: boolean
 }
 
 function confidenceBand(c: number): 'high' | 'medium' | 'low' {
@@ -57,13 +64,21 @@ function RelationRow({ rel, direction, onNodeFocus }: {
   )
 }
 
-export function NodeInspector({ context, onClose, onNodeFocus, onPhaseSelect, onTechniqueSelect }: NodeInspectorProps) {
+export function NodeInspector({
+  context, onClose, onNodeFocus, onPhaseSelect, onTechniqueSelect,
+  style, headerProps, onPanelPointerDown, focused,
+}: NodeInspectorProps) {
   const { node, parents, children, phases, techniques, chainDescriptions, onAttackPath, maxConfidence, evidenceCount } = context
   const attrs = Object.entries(node.attrs)
 
   return (
-    <aside className="node-inspector" aria-label="Node details">
-      <header className="inspector-head">
+    <aside
+      className={`node-inspector${focused ? ' node-inspector-focused' : ''}`}
+      aria-label="Node details"
+      style={style}
+      onPointerDown={onPanelPointerDown}
+    >
+      <header className="inspector-head" {...headerProps}>
         <div className="inspector-title">
           <span className={`inspector-kind inspector-kind-${node.kind.toLowerCase()}`}>{node.kind}</span>
           <span className="inspector-name" title={node.label}>{shortenNodeLabel(node.label)}</span>
