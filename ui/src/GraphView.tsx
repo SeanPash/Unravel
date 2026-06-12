@@ -7,6 +7,9 @@ import { assignIncidents, sectionSlot } from './incidentMap'
 import type { IncidentRef, IncidentAssignment } from './incidentMap'
 import { Minimap } from './Minimap'
 import type { MinimapData } from './Minimap'
+import { NodeInspector } from './NodeInspector'
+import type { NodeContext } from './nodeContext'
+import type { AttackPhase } from './attackPhases'
 
 cytoscape.use(cola)
 
@@ -25,6 +28,12 @@ export interface GraphViewProps {
   // Selected attack phase: its members light up in the phase color, the rest
   // of the graph fades back, and the camera frames the phase subgraph.
   phaseFocus?: PhaseFocus | null
+  // Investigation context for the focused node, rendered as the inspector
+  // drawer. Chip and relation clicks route back into the app's focus
+  // machinery via the two select callbacks.
+  nodeContext?: NodeContext | null
+  onPhaseSelect?: (phase: AttackPhase) => void
+  onTechniqueSelect?: (techniqueId: string) => void
 }
 
 export interface PhaseFocus {
@@ -420,12 +429,6 @@ const COLA_OPTIONS: ColaLayoutOptions = {
 
 // --- Component ---
 
-interface Tooltip {
-  node: WsNode
-  x: number
-  y: number
-}
-
 // A focus fog circle in rendered (screen) coordinates.
 interface SectionGlow {
   id: string
@@ -446,6 +449,7 @@ interface EdgeTooltip {
 export function GraphView({
   nodes, edges, chain, timeWindow, focusedNodeId, onNodeFocus,
   incidents, activeIncidentId, onIncidentSelect, phaseFocus,
+  nodeContext, onPhaseSelect, onTechniqueSelect,
 }: GraphViewProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const cyRef = useRef<Core | null>(null)
@@ -454,7 +458,6 @@ export function GraphView({
   const addedEdgeIds = useRef(new Set<string>())
   const labelBand = useRef<LabelClass>('labels-faint')
   const firstBatch = useRef(true)
-  const [tooltip, setTooltip] = useState<Tooltip | null>(null)
   const [edgeTooltip, setEdgeTooltip] = useState<EdgeTooltip | null>(null)
   const [mini, setMini] = useState<MinimapData | null>(null)
   const [glows, setGlows] = useState<SectionGlow[]>([])
@@ -638,8 +641,6 @@ export function GraphView({
 
     cy.on('tap', 'node', (e) => {
       const target = e.target as cytoscape.NodeSingular
-      const pos = e.renderedPosition
-      setTooltip({ node: e.target.data() as WsNode, x: pos.x, y: pos.y })
       clearPinnedEdge()
       onNodeFocusRef.current?.(target.id())
       // Tapping into another incident's cluster also makes that incident
@@ -653,7 +654,6 @@ export function GraphView({
     })
     cy.on('tap', (e) => {
       if (e.target === cy) {
-        setTooltip(null)
         clearPinnedEdge()
         onNodeFocusRef.current?.(null)
       }
@@ -715,7 +715,6 @@ export function GraphView({
     cy.on('tap', 'edge', (e) => {
       const edge = e.target as cytoscape.EdgeSingular
       const conf = (edge.data('confidence') as number) ?? 0.5
-      setTooltip(null)
       clearPinnedEdge()
       pinnedEdge = edge
       edge.addClass('label-pinned')
@@ -1329,20 +1328,14 @@ export function GraphView({
           </div>
         ))}
       </div>
-      {tooltip && (
-        <div
-          className="graph-tooltip"
-          style={{ left: tooltip.x + 12, top: tooltip.y - 10 }}
-          role="tooltip"
-        >
-          <div className="graph-tooltip-label">{tooltip.node.label}</div>
-          <div className="graph-tooltip-kind">{tooltip.node.kind}</div>
-          {Object.entries(tooltip.node.attrs).map(([k, v]) => (
-            <div key={k} className="graph-tooltip-attr">
-              <span className="graph-tooltip-key">{k}:</span> {String(v)}
-            </div>
-          ))}
-        </div>
+      {nodeContext && (
+        <NodeInspector
+          context={nodeContext}
+          onClose={() => onNodeFocus?.(null)}
+          onNodeFocus={(id) => onNodeFocus?.(id)}
+          onPhaseSelect={(p) => onPhaseSelect?.(p)}
+          onTechniqueSelect={(id) => onTechniqueSelect?.(id)}
+        />
       )}
       {edgeTooltip && (
         <div

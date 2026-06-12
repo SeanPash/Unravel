@@ -382,49 +382,6 @@
   flex-shrink: 0;
 }
 
-/* Node tooltip */
-.graph-tooltip {
-  position: absolute;
-  z-index: 100;
-  background: var(--bg-elevated);
-  border: 1px solid var(--border);
-  border-left: 3px solid var(--accent-green);
-  border-radius: var(--radius);
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.6);
-  padding: var(--space-2) var(--space-3);
-  min-width: 150px;
-  pointer-events: none;
-}
-
-.graph-tooltip-label {
-  font-family: var(--font-display);
-  font-size: 13px;
-  font-weight: 500;
-  letter-spacing: 0.04em;
-  color: var(--text-primary);
-  margin-bottom: 2px;
-}
-
-.graph-tooltip-kind {
-  font-family: var(--font-display);
-  font-size: 9px;
-  letter-spacing: 0.12em;
-  color: var(--text-faint);
-  text-transform: uppercase;
-  margin-bottom: 8px;
-}
-
-.graph-tooltip-attr {
-  font-family: var(--font-mono);
-  font-size: 11px;
-  color: var(--text-primary);
-  line-height: 1.5;
-}
-
-.graph-tooltip-key {
-  color: var(--text-faint);
-}
-
 /* Edge relationship tooltip, pinned by clicking an edge - DOM-rendered so
    it sits above the canvas and persists until the background is tapped */
 .graph-edge-tooltip {
@@ -1013,6 +970,243 @@
   letter-spacing: 0.06em;
   text-transform: uppercase;
   font-size: 11px;
+}
+
+/* ─── Node inspector ──────────────────────────────────────────────────── */
+
+/* Investigation drawer for the focused node, floating beside the camera
+   controls. Same glass treatment as the minimap so the graph overlays read
+   as one family. */
+.node-inspector {
+  position: absolute;
+  z-index: 50;
+  top: var(--space-3);
+  right: 52px;
+  width: 270px;
+  max-height: calc(100% - 70px);
+  overflow-y: auto;
+  background: linear-gradient(170deg, rgba(26, 33, 40, 0.92), rgba(13, 17, 21, 0.92));
+  border: 1px solid rgba(79, 167, 217, 0.14);
+  border-radius: calc(var(--radius) + 3px);
+  box-shadow:
+    0 4px 18px rgba(0, 0, 0, 0.45),
+    inset 0 1px 0 rgba(221, 227, 233, 0.04);
+  backdrop-filter: blur(5px);
+}
+
+.inspector-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.inspector-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.inspector-kind {
+  font-family: var(--font-display);
+  font-size: 9px;
+  font-weight: 500;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  padding: 2px 6px;
+  border-radius: 3px;
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.inspector-kind-process { color: #4fa7d9; border-color: rgba(79, 167, 217, 0.4); }
+.inspector-kind-host { color: #53a051; border-color: rgba(83, 160, 81, 0.4); }
+.inspector-kind-user { color: #f0b429; border-color: rgba(240, 180, 41, 0.4); }
+.inspector-kind-netflow { color: #9d7cd8; border-color: rgba(157, 124, 216, 0.4); }
+
+.inspector-name {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.inspector-close {
+  display: inline-flex;
+  border: none;
+  background: transparent;
+  color: var(--text-faint);
+  cursor: pointer;
+  padding: 2px;
+}
+
+.inspector-close:hover {
+  color: var(--text-primary);
+}
+
+.inspector-section {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.inspector-section h3 {
+  margin: 0 0 6px;
+  font-family: var(--font-display);
+  font-size: 9px;
+  font-weight: 500;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.inspector-section-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.inspector-conf {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.inspector-role {
+  margin: 0;
+  padding-left: 16px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-primary);
+}
+
+.inspector-role li {
+  margin-bottom: 2px;
+}
+
+.inspector-quiet {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-faint);
+  font-style: italic;
+}
+
+.inspector-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.inspector-chip {
+  font-family: var(--font-display);
+  font-size: 9px;
+  font-weight: 500;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  padding: 3px 8px;
+  border-radius: 3px;
+  cursor: pointer;
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--phase-accent) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--phase-accent) 45%, transparent);
+  transition: background 0.12s, border-color 0.12s;
+}
+
+.inspector-chip:hover {
+  background: color-mix(in srgb, var(--phase-accent) 22%, transparent);
+  border-color: color-mix(in srgb, var(--phase-accent) 75%, transparent);
+}
+
+.inspector-chip-tech {
+  font-family: var(--font-mono);
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 10px;
+}
+
+.inspector-relations {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.inspector-relation {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 3px 4px;
+  border: none;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--text-faint);
+  font: inherit;
+  font-size: 11px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.inspector-relation:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.inspector-relation-kind {
+  color: var(--text-faint);
+  white-space: nowrap;
+}
+
+.inspector-relation-label {
+  font-family: var(--font-mono);
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.inspector-relation:hover .inspector-relation-label {
+  color: var(--text-primary);
+}
+
+.inspector-attrs {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.inspector-attr {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-2);
+  font-size: 11px;
+}
+
+.inspector-attr dt {
+  color: var(--text-faint);
+}
+
+.inspector-attr dd {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+}
+
+.inspector-foot {
+  padding: 8px 12px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-faint);
 }
 
 /* ─── Attack phases panel ─────────────────────────────────────────────── */

@@ -9,6 +9,7 @@ import { TimeScrubber } from './TimeScrubber'
 import { DetailTabs, type DetailTab } from './DetailTabs'
 import { IncidentList } from './IncidentList'
 import { selectRelatedLogs } from './logFilter'
+import { buildNodeContext } from './nodeContext'
 import { displayRange, buildPhases } from './timeline'
 import './App.css'
 
@@ -293,6 +294,16 @@ export default function App() {
     })
   }
 
+  // Investigation context for the focused node, shown as the graph's
+  // inspector drawer.
+  const nodeContext = useMemo(
+    () => state.focusedNodeId
+      ? buildNodeContext(state.focusedNodeId, state.nodes, edges, activeChain, attackPhases, techniqueFoci)
+      : null,
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [state.focusedNodeId, state.nodes, state.edges, activeChain, attackPhases, techniqueFoci],
+  )
+
   const relatedLogs = selectRelatedLogs(
     state.logs, edges, activeChain, state.focusedNodeId, state.timeWindow, state.focusedEventId,
     focus?.eventIds ?? null,
@@ -348,6 +359,9 @@ export default function App() {
                 activeIncidentId={state.activeIncidentId}
                 onIncidentSelect={(id) => dispatch({ type: 'select_incident', payload: id })}
                 phaseFocus={phaseFocus}
+                nodeContext={nodeContext}
+                onPhaseSelect={handlePhaseSelect}
+                onTechniqueSelect={handleTechniqueSelect}
               />
               {edges.length > 0 && (
                 <TimeScrubber
