@@ -245,6 +245,105 @@
   background-size: 26px 26px, 100% 100%, 100% 100%, 100% 100%;
 }
 
+/* ─── Incident focus fog ──────────────────────────────────────────────── */
+
+/* A circular fog of light behind the focused incident: pure radial fade to
+   transparent, screen-blended so it only ever brightens. Red ties it to the
+   active-incident accent; the long falloff keeps it translucent rather than
+   alarming. Positioned in rendered coordinates by GraphView and kept in
+   step with the camera. */
+.section-glow {
+  position: absolute;
+  z-index: 5;
+  pointer-events: none;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  background: radial-gradient(
+    circle,
+    rgba(220, 78, 65, 0.21) 0%,
+    rgba(220, 78, 65, 0.08) 44%,
+    rgba(220, 78, 65, 0) 70%
+  );
+  mix-blend-mode: screen;
+  transition: opacity 0.25s ease;
+}
+
+/* Hover preview: present but quieter than the active incident's fog */
+.section-glow-hover {
+  opacity: 0.6;
+}
+
+/* ─── Incident minimap ────────────────────────────────────────────────── */
+
+.graph-minimap {
+  position: absolute;
+  z-index: 50;
+  left: var(--space-3);
+  top: var(--space-3);
+  padding: 6px;
+  background: linear-gradient(170deg, rgba(26, 33, 40, 0.88), rgba(13, 17, 21, 0.88));
+  border: 1px solid rgba(79, 167, 217, 0.14);
+  border-radius: calc(var(--radius) + 3px);
+  box-shadow:
+    0 4px 18px rgba(0, 0, 0, 0.45),
+    inset 0 1px 0 rgba(221, 227, 233, 0.04);
+  backdrop-filter: blur(5px);
+  line-height: 0;
+}
+
+.graph-minimap svg {
+  cursor: crosshair;
+}
+
+.minimap-section ellipse {
+  fill: rgba(44, 58, 71, 0.35);
+  stroke: rgba(70, 83, 95, 0.55);
+  stroke-width: 1;
+  cursor: pointer;
+  transition: fill 0.12s ease, stroke 0.12s ease;
+}
+
+.minimap-section:hover ellipse {
+  fill: rgba(79, 167, 217, 0.2);
+  stroke: rgba(79, 167, 217, 0.7);
+}
+
+.minimap-section text {
+  fill: #8a99a8;
+  font-family: var(--font-display);
+  font-size: 8px;
+  letter-spacing: 0.08em;
+  text-anchor: middle;
+  cursor: pointer;
+  user-select: none;
+}
+
+.minimap-section-active ellipse {
+  fill: rgba(79, 167, 217, 0.18);
+  stroke: rgba(79, 167, 217, 0.8);
+}
+
+.minimap-section-active text {
+  fill: #dde3e9;
+}
+
+.minimap-related {
+  stroke: #46535f;
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+}
+
+.minimap-dot {
+  fill: #46535f;
+}
+
+.minimap-viewport {
+  fill: rgba(221, 227, 233, 0.05);
+  stroke: rgba(221, 227, 233, 0.65);
+  stroke-width: 1;
+  pointer-events: none;
+}
+
 /* Node kind legend */
 .graph-legend {
   position: absolute;
@@ -417,6 +516,30 @@
 .graph-ctrl-btn:active {
   transform: translateY(1px);
   box-shadow: none;
+}
+
+.graph-ctrl-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+  pointer-events: none;
+}
+
+.graph-ctrl-btn svg {
+  display: block;
+}
+
+/* Latched toggle (auto-snap): amber when engaged */
+.graph-ctrl-btn-on {
+  color: var(--accent-amber);
+  border-color: rgba(240, 180, 41, 0.5);
+  background: linear-gradient(180deg, rgba(240, 180, 41, 0.16), rgba(18, 23, 28, 0.9));
+}
+
+.graph-ctrl-btn-on:hover {
+  color: var(--accent-amber);
+  border-color: rgba(240, 180, 41, 0.7);
+  background: linear-gradient(180deg, rgba(240, 180, 41, 0.24), rgba(18, 23, 28, 0.9));
+  box-shadow: 0 0 12px rgba(240, 180, 41, 0.15), inset 0 1px 0 rgba(221, 227, 233, 0.08);
 }
 
 .graph-ctrl-sep {
