@@ -1,4 +1,4 @@
-﻿import { useEffect, useMemo, useReducer, useRef } from 'react'
+﻿import { useCallback, useEffect, useMemo, useReducer, useRef } from 'react'
 import { EngineSocket } from './ws'
 import type { GraphUpdatePayload, ScoreUpdatePayload, ChainResultPayload, NarrationPayload, WsNode, WsEdge, LogEventPayload, ThreatIntelPayload } from './ws'
 import { GraphView } from './GraphView'
@@ -294,14 +294,12 @@ export default function App() {
     })
   }
 
-  // Investigation context for the focused node, shown as the graph's
-  // inspector drawer.
-  const nodeContext = useMemo(
-    () => state.focusedNodeId
-      ? buildNodeContext(state.focusedNodeId, state.nodes, edges, activeChain, attackPhases, techniqueFoci)
-      : null,
+  // Investigation context builder for the graph's inspector drawers. The
+  // view keeps one drawer per pinned node, so it asks per node id.
+  const getNodeContext = useCallback(
+    (nodeId: string) => buildNodeContext(nodeId, state.nodes, edges, activeChain, attackPhases, techniqueFoci),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [state.focusedNodeId, state.nodes, state.edges, activeChain, attackPhases, techniqueFoci],
+    [state.nodes, state.edges, activeChain, attackPhases, techniqueFoci],
   )
 
   const relatedLogs = selectRelatedLogs(
@@ -359,7 +357,7 @@ export default function App() {
                 activeIncidentId={state.activeIncidentId}
                 onIncidentSelect={(id) => dispatch({ type: 'select_incident', payload: id })}
                 phaseFocus={phaseFocus}
-                nodeContext={nodeContext}
+                getNodeContext={getNodeContext}
                 onPhaseSelect={handlePhaseSelect}
                 onTechniqueSelect={handleTechniqueSelect}
               />

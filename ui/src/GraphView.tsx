@@ -28,10 +28,10 @@ export interface GraphViewProps {
   // Selected attack phase: its members light up in the phase color, the rest
   // of the graph fades back, and the camera frames the phase subgraph.
   phaseFocus?: PhaseFocus | null
-  // Investigation context for the focused node, rendered as the inspector
-  // drawer. Chip and relation clicks route back into the app's focus
-  // machinery via the two select callbacks.
-  nodeContext?: NodeContext | null
+  // Builds the investigation context for any node id, so the view can keep
+  // several inspector drawers open at once. Chip and relation clicks route
+  // back into the app's focus machinery via the two select callbacks.
+  getNodeContext?: (nodeId: string) => NodeContext | null
   onPhaseSelect?: (phase: AttackPhase) => void
   onTechniqueSelect?: (techniqueId: string) => void
 }
@@ -446,10 +446,80 @@ interface EdgeTooltip {
   y: number
 }
 
+// One open inspector drawer: which node, where the user has put it, and its
+// stacking height. z is a monotonic counter rather than an array position:
+// raising a panel must not reorder the DOM, because moving an element
+// cancels its pointer capture mid-drag and can swallow an in-flight click.
+interface OpenInspector {
+  nodeId: string
+  x: number
+  y: number
+  z: number
+}
+
+// Positions a NodeInspector absolutely and lets its header drag it around
+// the graph canvas. The drag grip is the header only, so chips, relation
+// rows, and scrolling inside the body stay ordinary clicks.
+function DraggableInspector({
+  entry, context, zIndex, focused, container,
+  onMove, onRaise, onClose, onNodeFocus, onPhaseSelect, onTechniqueSelect,
+}: {
+  entry: OpenInspector
+  context: NodeContext
+  zIndex: number
+  focused: boolean
+  container: HTMLDivElement | null
+  onMove: (x: number, y: number) => void
+  onRaise: () => void
+  onClose: () => void
+  onNodeFocus: (nodeId: string) => void
+  onPhaseSelect: (phase: AttackPhase) => void
+  onTechniqueSelect: (techniqueId: string) => void
+}) {
+  const dragRef = useRef<{ dx: number; dy: number } | null>(null)
+  return (
+    <NodeInspector
+      context={context}
+      focused={focused}
+      style={{ left: entry.x, top: entry.y, zIndex }}
+      onPanelPointerDown={onRaise}
+      headerProps={{
+        onPointerDown: (e) => {
+          if ((e.target as HTMLElement).closest('.inspector-close')) return
+          dragRef.current = { dx: e.clientX - entry.x, dy: e.clientY - entry.y }
+          ;(e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId)
+        },
+        onPointerMove: (e) => {
+          const d = dragRef.current
+          if (!d) return
+          let x = e.clientX - d.dx
+          let y = e.clientY - d.dy
+          // Keep at least a grabbable sliver of the panel inside the canvas.
+          const rect = container?.getBoundingClientRect()
+          if (rect && rect.width > 0) {
+            x = Math.min(Math.max(x, 8 - INSPECTOR_WIDTH + 60), rect.width - 60)
+            y = Math.min(Math.max(y, 0), rect.height - 36)
+          }
+          onMove(x, y)
+        },
+        onPointerUp: () => { dragRef.current = null },
+      }}
+      onClose={onClose}
+      onNodeFocus={onNodeFocus}
+      onPhaseSelect={onPhaseSelect}
+      onTechniqueSelect={onTechniqueSelect}
+    />
+  )
+}
+
+const INSPECTOR_WIDTH = 270
+// Cascade offset for each newly opened drawer so they stack readably.
+const INSPECTOR_CASCADE = 26
+
 export function GraphView({
   nodes, edges, chain, timeWindow, focusedNodeId, onNodeFocus,
   incidents, activeIncidentId, onIncidentSelect, phaseFocus,
-  nodeContext, onPhaseSelect, onTechniqueSelect,
+  getNodeContext, onPhaseSelect, onTechniqueSelect,
 }: GraphViewProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const cyRef = useRef<Core | null>(null)
@@ -1073,6 +1143,61 @@ export function GraphView({
     }
   }, [focusedNodeId, nodes])
 
+  // Open inspector drawers: focusing a node opens its inspector (cascaded so
+  // panels stack readably); the user drags them anywhere and pins as many as
+  // they like. Pixel positions are view furniture, so they live here rather
+  // than in app state.
+  const [inspectors, setInspectors] = useState<OpenInspector[]>([])
+  const inspectorZRef = useRef(60)
+
+  useEffect(() => {
+    if (!focusedNodeId) return
+    setInspectors((cur) => {
+      if (cur.some((i) => i.nodeId === focusedNodeId)) return cur
+      const rect = containerRef.current?.getBoundingClientRect()
+      const baseX = rect && rect.width > 0 ? Math.max(12, rect.width - INSPECTOR_WIDTH - 64) : 12
+      const offset = (cur.length % 6) * INSPECTOR_CASCADE
+      inspectorZRef.current += 1
+      return [...cur, {
+        nodeId: focusedNodeId,
+        x: Math.max(12, baseX - offset),
+        y: 12 + offset,
+        z: inspectorZRef.current,
+      }]
+    })
+  }, [focusedNodeId])
+
+  // Inspectors describe nodes in the context of the active incident's chain;
+  // switching incidents retires the whole set. The ref skips the mount run,
+  // which would otherwise clear the very drawer the focus effect just opened.
+  const prevIncidentRef = useRef(activeIncidentId)
+  useEffect(() => {
+    if (prevIncidentRef.current === activeIncidentId) return
+    prevIncidentRef.current = activeIncidentId
+    setInspectors([])
+  }, [activeIncidentId])
+
+  function moveInspector(nodeId: string, x: number, y: number) {
+    setInspectors((cur) => cur.map((i) => (i.nodeId === nodeId ? { ...i, x, y } : i)))
+  }
+
+  // Pressing a panel raises it by bumping its z; the array (and therefore
+  // the DOM) keeps insertion order.
+  function raiseInspector(nodeId: string) {
+    setInspectors((cur) => {
+      const entry = cur.find((i) => i.nodeId === nodeId)
+      if (!entry || entry.z === inspectorZRef.current) return cur
+      inspectorZRef.current += 1
+      const z = inspectorZRef.current
+      return cur.map((i) => (i.nodeId === nodeId ? { ...i, z } : i))
+    })
+  }
+
+  function closeInspector(nodeId: string) {
+    setInspectors((cur) => cur.filter((i) => i.nodeId !== nodeId))
+    if (nodeId === focusedNodeId) onNodeFocus?.(null)
+  }
+
   // Selected attack phase: paint members in the phase color, fade the rest,
   // and frame the phase subgraph. The flown ref dedupes the camera move so
   // streaming graph updates re-apply classes without re-yanking the view.
@@ -1328,15 +1453,26 @@ export function GraphView({
           </div>
         ))}
       </div>
-      {nodeContext && (
-        <NodeInspector
-          context={nodeContext}
-          onClose={() => onNodeFocus?.(null)}
-          onNodeFocus={(id) => onNodeFocus?.(id)}
-          onPhaseSelect={(p) => onPhaseSelect?.(p)}
-          onTechniqueSelect={(id) => onTechniqueSelect?.(id)}
-        />
-      )}
+      {getNodeContext && inspectors.map((entry) => {
+        const ctx = getNodeContext(entry.nodeId)
+        if (!ctx) return null
+        return (
+          <DraggableInspector
+            key={entry.nodeId}
+            entry={entry}
+            context={ctx}
+            zIndex={entry.z}
+            focused={entry.nodeId === focusedNodeId}
+            container={containerRef.current}
+            onMove={(x, y) => moveInspector(entry.nodeId, x, y)}
+            onRaise={() => raiseInspector(entry.nodeId)}
+            onClose={() => closeInspector(entry.nodeId)}
+            onNodeFocus={(id) => onNodeFocus?.(id)}
+            onPhaseSelect={(p) => onPhaseSelect?.(p)}
+            onTechniqueSelect={(id) => onTechniqueSelect?.(id)}
+          />
+        )
+      })}
       {edgeTooltip && (
         <div
           className="graph-edge-tooltip"
