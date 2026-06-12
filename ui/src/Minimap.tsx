@@ -30,11 +30,15 @@ export interface MinimapProps {
   data: MinimapData
   onSectionClick: (incidentId: string) => void
   onJump: (worldX: number, worldY: number) => void
+  // Scrub navigation: fired for every mouse move over the minimap with the
+  // world point under the cursor, then once when the cursor leaves.
+  onHover: (worldX: number, worldY: number) => void
+  onHoverEnd: () => void
 }
 
 const center = (r: Rect) => ({ x: (r.x1 + r.x2) / 2, y: (r.y1 + r.y2) / 2 })
 
-export function Minimap({ data, onSectionClick, onJump }: MinimapProps) {
+export function Minimap({ data, onSectionClick, onJump, onHover, onHoverEnd }: MinimapProps) {
   const t = minimapTransform(data.world, MINIMAP_W, MINIMAP_H, MINIMAP_PAD)
   const sectionById = new Map(data.sections.map((s) => [s.id, s]))
 
@@ -44,10 +48,19 @@ export function Minimap({ data, onSectionClick, onJump }: MinimapProps) {
     return { x: a.x, y: a.y, width: Math.max(b.x - a.x, 4), height: Math.max(b.y - a.y, 4) }
   }
 
-  function handleBackgroundClick(e: React.MouseEvent<SVGSVGElement>) {
+  const worldPoint = (e: React.MouseEvent<SVGSVGElement>) => {
     const svg = e.currentTarget.getBoundingClientRect()
-    const p = fromMini(t, e.clientX - svg.left, e.clientY - svg.top)
+    return fromMini(t, e.clientX - svg.left, e.clientY - svg.top)
+  }
+
+  function handleBackgroundClick(e: React.MouseEvent<SVGSVGElement>) {
+    const p = worldPoint(e)
     onJump(p.x, p.y)
+  }
+
+  function handleMouseMove(e: React.MouseEvent<SVGSVGElement>) {
+    const p = worldPoint(e)
+    onHover(p.x, p.y)
   }
 
   const viewport = rectOf(data.viewport)
@@ -59,6 +72,8 @@ export function Minimap({ data, onSectionClick, onJump }: MinimapProps) {
         height={MINIMAP_H}
         viewBox={`0 0 ${MINIMAP_W} ${MINIMAP_H}`}
         onClick={handleBackgroundClick}
+        onMouseMove={handleMouseMove}
+        onMouseLeave={onHoverEnd}
       >
         {data.related.map(([a, b]) => {
           const sa = sectionById.get(a)
