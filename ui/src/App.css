@@ -1180,11 +1180,13 @@
   color: var(--text-muted);
 }
 
-/* Tab accent colors: Logs=blue, ATT&CK=red, Intel=purple */
+/* Tab accent colors: ATT&CK=red, Intel=purple. Logs stays neutral: the log
+   rows below rotate through every phase accent, so a colored tab would read
+   as part of the log content. */
 .detail-tab:nth-child(1).detail-tab-active {
-  color: var(--accent-blue-bright);
-  border-bottom-color: var(--accent-blue-bright);
-  background: rgba(79, 167, 217, 0.05);
+  color: var(--text-primary);
+  border-bottom-color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.04);
 }
 
 .detail-tab:nth-child(2).detail-tab-active {
