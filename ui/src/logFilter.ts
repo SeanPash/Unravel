@@ -11,9 +11,11 @@ export interface RelatedLog {
 // Unfocused: logs backing the extracted chain's steps (the reconstruction's
 // conclusion). Node-focused: logs backing any edge incident to the focused
 // node, whether or not that edge made the chain. Event-focused (for chain
-// steps with no graph edge): exactly that event's log. A non-null timeWindow
-// further restricts rows to logs inside it, so scrubbing and playback reveal
-// logs in step with the graph. Always time-sorted ascending.
+// steps with no graph edge): exactly that event's log. Phase-focused (an
+// attack phase card selected, and no node or event focus): the phase's
+// evidence events. A non-null timeWindow further restricts rows to logs
+// inside it, so scrubbing and playback reveal logs in step with the graph.
+// Always time-sorted ascending.
 export function selectRelatedLogs(
   logs: Record<string, LogEventPayload>,
   edges: WsEdge[],
@@ -21,6 +23,7 @@ export function selectRelatedLogs(
   focusedNodeId: string | null,
   timeWindow: [number, number] | null = null,
   focusedEventId: string | null = null,
+  phaseEventIds: string[] | null = null,
 ): RelatedLog[] {
   const chainIds = new Set(chain?.steps.map(s => s.event_id) ?? [])
 
@@ -34,6 +37,8 @@ export function selectRelatedLogs(
     }
   } else if (focusedEventId !== null) {
     ids = new Set([focusedEventId])
+  } else if (phaseEventIds !== null) {
+    ids = new Set(phaseEventIds)
   } else {
     ids = chainIds
   }

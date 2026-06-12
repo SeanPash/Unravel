@@ -6,7 +6,7 @@ import { fileURLToPath } from 'url'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const FIXTURE_PATH = join(__dirname, 'fixtures', 'chain-phishing.json')
-const PORT = 8080
+const PORT = Number(process.env.MOCK_PORT ?? 8080)
 const WS_PATH = '/ws'
 // Delay between replayed messages in milliseconds
 const MSG_DELAY_MS = 1_500

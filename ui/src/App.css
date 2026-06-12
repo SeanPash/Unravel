@@ -603,6 +603,12 @@
   filter: brightness(1.35);
 }
 
+/* Segment of the attack phase selected in the phase panel: lit like a hover
+   that does not fade, echoing the card's accent. */
+.timeline-phase-active {
+  filter: brightness(1.45);
+}
+
 .timeline-phase-label {
   font-family: var(--font-display);
   font-size: 9px;
@@ -965,28 +971,153 @@
   font-size: 11px;
 }
 
-/* ─── Narration panel ─────────────────────────────────────────────────── */
+/* ─── Attack phases panel ─────────────────────────────────────────────── */
 
-.narration-panel {
+.phase-panel {
   display: flex;
   flex-direction: column;
-  gap: var(--space-3);
+  gap: var(--space-4);
 }
 
-.narration-empty {
+.phase-panel-empty {
   color: var(--text-faint);
   font-size: 13px;
   font-style: italic;
 }
 
-.narration-text {
-  color: var(--text-primary);
-  font-size: 13px;
-  line-height: 1.7;
+.phase-list {
+  list-style: none;
   margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
 }
 
-.narration-panel h3 {
+/* One investigation checkpoint per attack phase. The card borrows its accent
+   from the phase palette shared with the timeline segments and log rows, so
+   selecting a card visibly links all three views. */
+.phase-card {
+  display: flex;
+  gap: 10px;
+  width: 100%;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--border-subtle);
+  border-left: 3px solid var(--phase-accent);
+  border-radius: 4px;
+  padding: 10px 12px;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, box-shadow 0.2s, transform 0.15s;
+}
+
+.phase-card:hover {
+  background: color-mix(in srgb, var(--phase-accent) 6%, transparent);
+  border-color: color-mix(in srgb, var(--phase-accent) 40%, var(--border-subtle));
+  transform: translateY(-1px);
+}
+
+.phase-card:active {
+  transform: translateY(0);
+}
+
+.phase-card-active,
+.phase-card-active:hover {
+  background: color-mix(in srgb, var(--phase-accent) 10%, transparent);
+  border-color: color-mix(in srgb, var(--phase-accent) 70%, transparent);
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--phase-accent) 30%, transparent),
+    0 0 16px color-mix(in srgb, var(--phase-accent) 18%, transparent);
+}
+
+.phase-card-icon {
+  color: var(--phase-accent);
+  flex-shrink: 0;
+  margin-top: 1px;
+  display: inline-flex;
+}
+
+.phase-card-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.phase-card-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.phase-card-title {
+  font-family: var(--font-display);
+  font-size: 11px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--text-primary);
+}
+
+.phase-card-conf {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.phase-card-conf-high { color: var(--accent-green); }
+.phase-card-conf-medium { color: var(--accent-amber); }
+.phase-card-conf-low { color: var(--accent-red); }
+
+.phase-card-summary {
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--text-muted);
+}
+
+/* The structural fallback summary shimmers softly until the AI's per-phase
+   prose replaces it. */
+@media (prefers-reduced-motion: no-preference) {
+  .phase-card-summary-pending {
+    animation: phase-summary-pending 1.6s ease-in-out infinite;
+  }
+}
+
+@keyframes phase-summary-pending {
+  0%, 100% { opacity: 0.55; }
+  50% { opacity: 0.95; }
+}
+
+.phase-card-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.phase-card-tech {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  padding: 1px 6px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 3px;
+  background: rgba(0, 0, 0, 0.25);
+  color: var(--text-muted);
+}
+
+.phase-card-evidence {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-faint);
+}
+
+.phase-notes h3 {
   font-family: var(--font-display);
   font-size: 9px;
   font-weight: 500;
