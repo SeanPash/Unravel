@@ -57,6 +57,83 @@ function annotateSteps(chain: ChainResultPayload): ChainStep[] {
   }))
 }
 
+// A MITRE technique as an investigation focus: the same structural facts as
+// an AttackPhase but grouped by technique_id instead of tactic, so clicking
+// a technique anywhere (ATT&CK ribbon, threat intel) can drive the exact
+// same graph/timeline/evidence synchronization. The color is inherited from
+// the first phase the technique appears in, keeping one color system.
+export interface TechniqueFocus {
+  // 'technique:' prefix keeps the id disjoint from phase ids inside the
+  // single activeFocusId selection slot.
+  id: string
+  techniqueId: string
+  name: string
+  color: string
+  eventIds: string[]
+  nodeIds: string[]
+  edgeIds: string[]
+  startTs: number
+  endTs: number
+  // Phases whose steps carry this technique, usually exactly one.
+  phaseIds: string[]
+}
+
+export function buildTechniqueFoci(
+  chain: ChainResultPayload | null,
+  edges: WsEdge[],
+  phases: AttackPhase[],
+): TechniqueFocus[] {
+  if (!chain) return []
+  const steps = [...chain.steps].filter((s) => s.technique_id).sort((a, b) => a.ts - b.ts)
+  if (steps.length === 0) return []
+
+  const edgesByEvent = new Map<string, WsEdge[]>()
+  for (const e of edges) {
+    if (!e.source_event_id) continue
+    if (!edgesByEvent.has(e.source_event_id)) edgesByEvent.set(e.source_event_id, [])
+    edgesByEvent.get(e.source_event_id)!.push(e)
+  }
+
+  const order: string[] = []
+  const grouped = new Map<string, ChainStep[]>()
+  for (const s of steps) {
+    const tid = s.technique_id!
+    if (!grouped.has(tid)) {
+      grouped.set(tid, [])
+      order.push(tid)
+    }
+    grouped.get(tid)!.push(s)
+  }
+
+  return order.map((tid) => {
+    const techSteps = grouped.get(tid)!
+    const eventIds = [...new Set(techSteps.map((s) => s.event_id))]
+    const nodeIds = new Set<string>()
+    const edgeIds: string[] = []
+    for (const eventId of eventIds) {
+      for (const e of edgesByEvent.get(eventId) ?? []) {
+        edgeIds.push(e.id)
+        nodeIds.add(e.src)
+        nodeIds.add(e.dst)
+      }
+    }
+    const eventSet = new Set(eventIds)
+    const parents = phases.filter((p) => p.eventIds.some((id) => eventSet.has(id)))
+    return {
+      id: `technique:${tid}`,
+      techniqueId: tid,
+      name: techSteps[0].technique_name ?? tid,
+      color: parents[0]?.color ?? PHASE_COLORS[0],
+      eventIds,
+      nodeIds: [...nodeIds],
+      edgeIds,
+      startTs: techSteps[0].ts,
+      endTs: techSteps[techSteps.length - 1].ts,
+      phaseIds: parents.map((p) => p.id),
+    }
+  })
+}
+
 export function buildAttackPhases(
   chain: ChainResultPayload | null,
   edges: WsEdge[],

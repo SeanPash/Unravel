@@ -24,6 +24,10 @@ export interface DetailTabsProps {
   // Threat Intel
   intel: ThreatIntelPayload | null
   awaitingIntel: boolean
+  // MITRE technique navigation, shared by the ATT&CK and intel tabs.
+  onTechniqueSelect?: (techniqueId: string) => void
+  activeTechniqueId?: string | null
+  chainTechniqueIds?: string[]
 }
 
 const TABS: { id: DetailTab; label: string }[] = [
@@ -62,10 +66,23 @@ export function DetailTabs(props: DetailTabsProps) {
           />
         )}
         {activeTab === 'attack' && (
-          <AttackPanel chain={props.chain} edges={props.edges} onNodeFocus={props.onNodeFocus} />
+          <AttackPanel
+            chain={props.chain}
+            edges={props.edges}
+            onNodeFocus={props.onNodeFocus}
+            onTechniqueSelect={props.onTechniqueSelect}
+            activeTechniqueId={props.activeTechniqueId}
+          />
         )}
         {activeTab === 'intel' && (
-          <ThreatIntelPanel intel={props.intel} awaiting={props.awaitingIntel} hasChain={props.hasChain} />
+          <ThreatIntelPanel
+            intel={props.intel}
+            awaiting={props.awaitingIntel}
+            hasChain={props.hasChain}
+            onTechniqueSelect={props.onTechniqueSelect}
+            activeTechniqueId={props.activeTechniqueId}
+            chainTechniqueIds={props.chainTechniqueIds}
+          />
         )}
       </div>
     </section>

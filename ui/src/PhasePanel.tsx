@@ -26,7 +26,12 @@ import type { NarrationPayload } from './ws'
 
 export interface PhasePanelProps {
   phases: AttackPhase[]
-  activePhaseId: string | null
+  // The workspace's single focus slot: a phase id, or 'technique:<id>' when
+  // the focus came from a MITRE surface.
+  activeFocusId: string | null
+  // When a technique is the focus, its chips and parent cards light up here
+  // so the panel answers the selection made elsewhere.
+  activeTechnique?: { techniqueId: string; phaseIds: string[] } | null
   narration: NarrationPayload | null
   awaitingNarration: boolean
   onPhaseSelect: (phase: AttackPhase | null) => void
@@ -60,7 +65,7 @@ function confidenceBand(c: number): 'high' | 'medium' | 'low' {
   return 'low'
 }
 
-export function PhasePanel({ phases, activePhaseId, narration, awaitingNarration, onPhaseSelect }: PhasePanelProps) {
+export function PhasePanel({ phases, activeFocusId, activeTechnique, narration, awaitingNarration, onPhaseSelect }: PhasePanelProps) {
   if (phases.length === 0) {
     if (awaitingNarration) {
       return (
@@ -81,14 +86,16 @@ export function PhasePanel({ phases, activePhaseId, narration, awaitingNarration
       <ol className="phase-list">
         {phases.map((p) => {
           const Glyph = TACTIC_ICONS[p.id] ?? Crosshair
-          const active = p.id === activePhaseId
+          const active = p.id === activeFocusId
+          // A phase is "related" when the focused technique lives inside it.
+          const related = !active && (activeTechnique?.phaseIds.includes(p.id) ?? false)
           const pendingSummary = awaitingNarration && !p.aiSummary
           const extraTech = p.techniques.length - MAX_TECH_BADGES
           return (
             <li key={p.id}>
               <button
                 type="button"
-                className={`phase-card${active ? ' phase-card-active' : ''}`}
+                className={`phase-card${active ? ' phase-card-active' : ''}${related ? ' phase-card-related' : ''}`}
                 style={{ '--phase-accent': p.color } as React.CSSProperties}
                 aria-pressed={active}
                 onClick={() => onPhaseSelect(active ? null : p)}
@@ -108,7 +115,13 @@ export function PhasePanel({ phases, activePhaseId, narration, awaitingNarration
                   </span>
                   <span className="phase-card-meta">
                     {p.techniques.slice(0, MAX_TECH_BADGES).map((t) => (
-                      <span key={t.id} className="phase-card-tech" title={t.name}>{t.id}</span>
+                      <span
+                        key={t.id}
+                        className={`phase-card-tech${t.id === activeTechnique?.techniqueId ? ' phase-card-tech-active' : ''}`}
+                        title={t.name}
+                      >
+                        {t.id}
+                      </span>
                     ))}
                     {extraTech > 0 && <span className="phase-card-tech phase-card-tech-more">+{extraTech}</span>}
                     <span className="phase-card-evidence">

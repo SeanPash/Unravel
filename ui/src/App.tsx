@@ -1,9 +1,9 @@
-import { useEffect, useMemo, useReducer, useRef } from 'react'
+﻿import { useEffect, useMemo, useReducer, useRef } from 'react'
 import { EngineSocket } from './ws'
 import type { GraphUpdatePayload, ScoreUpdatePayload, ChainResultPayload, NarrationPayload, WsNode, WsEdge, LogEventPayload, ThreatIntelPayload } from './ws'
 import { GraphView } from './GraphView'
 import { PhasePanel } from './PhasePanel'
-import { buildAttackPhases } from './attackPhases'
+import { buildAttackPhases, buildTechniqueFoci } from './attackPhases'
 import type { AttackPhase } from './attackPhases'
 import { TimeScrubber } from './TimeScrubber'
 import { DetailTabs, type DetailTab } from './DetailTabs'
@@ -46,7 +46,7 @@ export interface AppState {
   incidents: Record<string, IncidentState>
   activeIncidentId: string | null
   // Selected attack phase card (kebab-case tactic id) of the active incident.
-  activePhaseId: string | null
+  activeFocusId: string | null
 }
 
 export type Action =
@@ -64,7 +64,9 @@ export type Action =
   | { type: 'threat_intel'; payload: ThreatIntelPayload }
   | { type: 'set_tab'; payload: DetailTab }
   | { type: 'select_incident'; payload: string }
-  | { type: 'select_phase'; payload: { id: string; endTs: number } | null }
+  // showEvidence opens the Logs tab with the selection; clicks originating
+  // inside a detail tab leave the user's tab alone.
+  | { type: 'select_focus'; payload: { id: string; endTs: number; showEvidence?: boolean } | null }
 
 export const initialState: AppState = {
   nodes: {},
@@ -78,7 +80,7 @@ export const initialState: AppState = {
   activeTab: 'logs',
   incidents: {},
   activeIncidentId: null,
-  activePhaseId: null,
+  activeFocusId: null,
 }
 
 function incidentIdOf(payload: { incident_id?: string }): string {
@@ -170,23 +172,23 @@ export function reducer(state: AppState, action: Action): AppState {
       return {
         ...state,
         activeIncidentId: action.payload,
-        activePhaseId: null,
+        activeFocusId: null,
         timeWindow: null,
       }
-    case 'select_phase': {
+    case 'select_focus': {
       if (action.payload === null) {
-        return { ...state, activePhaseId: null, timeWindow: null }
+        return { ...state, activeFocusId: null, timeWindow: null }
       }
       // Selecting a phase tells the story up to that point: the window ends
       // at the phase's last event, so the graph shows the attack as of that
       // phase and the evidence below is scoped to it.
       return {
         ...state,
-        activePhaseId: action.payload.id,
+        activeFocusId: action.payload.id,
         timeWindow: [0, action.payload.endTs],
         focusedNodeId: null,
         focusedEventId: null,
-        activeTab: 'logs',
+        activeTab: action.payload.showEvidence ? 'logs' : state.activeTab,
       }
     }
     case 'connected':
@@ -247,24 +249,53 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [activeChain, state.edges, active?.narration],
   )
-  const activePhase = attackPhases.find((p) => p.id === state.activePhaseId) ?? null
-  const phaseFocus = useMemo(
-    () => activePhase
-      ? { id: activePhase.id, nodeIds: activePhase.nodeIds, edgeIds: activePhase.edgeIds, color: activePhase.color }
-      : null,
-    [activePhase],
+  // MITRE techniques as alternative entry points into the same focus slot.
+  const techniqueFoci = useMemo(
+    () => buildTechniqueFoci(activeChain, edges, attackPhases),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [activeChain, state.edges, attackPhases],
   )
+  const activePhase = attackPhases.find((p) => p.id === state.activeFocusId) ?? null
+  const activeTechnique = activePhase
+    ? null
+    : techniqueFoci.find((t) => t.id === state.activeFocusId) ?? null
+  // The one selected investigation focus, whichever surface it came from.
+  const focus = activePhase ?? activeTechnique
+  const phaseFocus = useMemo(
+    () => focus
+      ? { id: focus.id, nodeIds: focus.nodeIds, edgeIds: focus.edgeIds, color: focus.color }
+      : null,
+    [focus],
+  )
+  // Timeline emphasis: the phase itself, or the single phase a technique
+  // lives in (none when a technique spans phases).
+  const activePhaseName = activePhase
+    ? activePhase.title
+    : activeTechnique && activeTechnique.phaseIds.length === 1
+      ? attackPhases.find((p) => p.id === activeTechnique.phaseIds[0])?.title ?? null
+      : null
 
   function handlePhaseSelect(phase: AttackPhase | null) {
     dispatch({
-      type: 'select_phase',
-      payload: phase === null ? null : { id: phase.id, endTs: phase.endTs },
+      type: 'select_focus',
+      payload: phase === null ? null : { id: phase.id, endTs: phase.endTs, showEvidence: true },
+    })
+  }
+
+  // Technique clicks come from inside the detail tabs, so the selection must
+  // not yank the user off the tab they are reading.
+  function handleTechniqueSelect(techniqueId: string) {
+    const target = techniqueFoci.find((t) => t.techniqueId === techniqueId)
+    if (!target) return
+    dispatch({
+      type: 'select_focus',
+      payload: state.activeFocusId === target.id ? null : { id: target.id, endTs: target.endTs },
     })
   }
 
   const relatedLogs = selectRelatedLogs(
     state.logs, edges, activeChain, state.focusedNodeId, state.timeWindow, state.focusedEventId,
-    activePhase?.eventIds ?? null,
+    focus?.eventIds ?? null,
   )
   const focusedStep = state.focusedEventId !== null
     ? activeChain?.steps.find((s) => s.event_id === state.focusedEventId) ?? null
@@ -326,7 +357,7 @@ export default function App() {
                   edges={edges}
                   chain={activeChain}
                   jump={state.timelineJump}
-                  activePhaseName={activePhase?.title ?? null}
+                  activePhaseName={activePhaseName}
                   onChange={(w) => dispatch({ type: 'set_time_window', payload: w })}
                   onEventFocus={(nodeId, eventId) => {
                     if (nodeId !== null) {
@@ -348,7 +379,8 @@ export default function App() {
             <div className="dash-panel-body narration-pane-body">
               <PhasePanel
                 phases={attackPhases}
-                activePhaseId={state.activePhaseId}
+                activeFocusId={state.activeFocusId}
+                activeTechnique={activeTechnique}
                 narration={active?.narration ?? null}
                 awaitingNarration={active?.awaitingNarration ?? false}
                 onPhaseSelect={handlePhaseSelect}
@@ -370,6 +402,9 @@ export default function App() {
           intel={active?.threatIntel ?? null}
           awaitingIntel={active?.awaitingIntel ?? false}
           onNodeFocus={(id) => dispatch({ type: 'focus_node', payload: id })}
+          onTechniqueSelect={handleTechniqueSelect}
+          activeTechniqueId={activeTechnique?.techniqueId ?? null}
+          chainTechniqueIds={techniqueFoci.map((t) => t.techniqueId)}
         />
       </main>
     </div>

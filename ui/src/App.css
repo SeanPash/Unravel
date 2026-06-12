@@ -1153,6 +1153,19 @@
   color: var(--text-muted);
 }
 
+/* Technique selected from a MITRE surface: its chip and the card(s) hosting
+   it answer with the phase accent, without claiming full selection. */
+.phase-card-tech-active {
+  border-color: color-mix(in srgb, var(--phase-accent) 70%, transparent);
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--phase-accent) 16%, transparent);
+}
+
+.phase-card-related {
+  border-color: color-mix(in srgb, var(--phase-accent) 45%, var(--border-subtle));
+  background: color-mix(in srgb, var(--phase-accent) 5%, transparent);
+}
+
 .phase-card-evidence {
   margin-left: auto;
   font-family: var(--font-mono);
@@ -1454,6 +1467,13 @@
   background: rgba(255, 255, 255, 0.05);
 }
 
+/* Cells of the technique the investigation is focused on. */
+.attack-step-active {
+  border-color: var(--accent-amber);
+  background: rgba(240, 180, 41, 0.1);
+  box-shadow: 0 0 10px rgba(240, 180, 41, 0.15);
+}
+
 .attack-step-id {
   font-family: var(--font-mono);
   font-weight: 500;
@@ -1533,6 +1553,29 @@
   gap: 8px;
   align-items: baseline;
   margin-bottom: 6px;
+}
+
+/* Chain-backed techniques are navigation: the head is a real button. */
+button.intel-technique-head-link {
+  border: none;
+  background: transparent;
+  padding: 0;
+  width: 100%;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+button.intel-technique-head-link:hover .intel-technique-name {
+  color: var(--text-primary);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.intel-technique-active {
+  border-color: var(--accent-purple);
+  background: rgba(157, 124, 216, 0.1);
+  box-shadow: 0 0 10px rgba(157, 124, 216, 0.15);
 }
 
 .intel-technique-id {
