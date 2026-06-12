@@ -264,6 +264,9 @@ export default function App() {
                 timeWindow={state.timeWindow}
                 focusedNodeId={state.focusedNodeId}
                 onNodeFocus={(id) => dispatch({ type: 'focus_node', payload: id })}
+                incidents={incidents}
+                activeIncidentId={state.activeIncidentId}
+                onIncidentSelect={(id) => dispatch({ type: 'select_incident', payload: id })}
               />
               {edges.length > 0 && (
                 <TimeScrubber
