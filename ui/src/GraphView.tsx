@@ -425,6 +425,9 @@ export function GraphView({
   const lastMiniAt = useRef(0)
   const hoverSectionRef = useRef<string | null>(null)
   const animatingRef = useRef(false)
+  // True while the cursor is scrubbing across the minimap, so the live
+  // camera pans it drives are not mistaken for user canvas drags.
+  const miniScrubRef = useRef(false)
   const [snapEnabled, setSnapEnabled] = useState(true)
   const snapEnabledRef = useRef(true)
   // Last incident the camera flew to, deduped so repeated renders do not
@@ -460,7 +463,7 @@ export function GraphView({
     const orphanDots = cy
       .nodes(':childless')
       .filter((n) => n.isOrphan() && n.visible())
-      .map((n) => ({ x: n.position('x'), y: n.position('y') }))
+      .map((n: cytoscape.NodeSingular) => ({ x: n.position('x'), y: n.position('y') }))
     setMini({
       world: cy.elements().boundingBox({}),
       sections,
@@ -1140,6 +1143,29 @@ export function GraphView({
     })
   }
 
+  // Hover scrubbing: while the cursor moves across the minimap the camera
+  // pans instantly to keep the hovered world point centered, at the current
+  // zoom. Auto-snap is held off until the cursor leaves, then the view
+  // settles exactly like the end of a manual pan.
+  function handleMiniHover(x: number, y: number) {
+    const cy = cyRef.current
+    if (!cy) return
+    if (!miniScrubRef.current) {
+      miniScrubRef.current = true
+      cy.stop()
+    }
+    animatingRef.current = true
+    const zoom = cy.zoom()
+    cy.pan({ x: cy.width() / 2 - x * zoom, y: cy.height() / 2 - y * zoom })
+  }
+
+  function handleMiniHoverEnd() {
+    if (!miniScrubRef.current) return
+    miniScrubRef.current = false
+    animatingRef.current = false
+    snapToNearest()
+  }
+
   function handleMiniSection(incidentId: string) {
     onIncidentSelectRef.current?.(incidentId)
     // Fly even when the incident is already active, so the minimap always
@@ -1158,7 +1184,13 @@ export function GraphView({
         />
       ))}
       {mini && (
-        <Minimap data={mini} onSectionClick={handleMiniSection} onJump={handleMiniJump} />
+        <Minimap
+          data={mini}
+          onSectionClick={handleMiniSection}
+          onJump={handleMiniJump}
+          onHover={handleMiniHover}
+          onHoverEnd={handleMiniHoverEnd}
+        />
       )}
       <div className="graph-controls">
         <button className="graph-ctrl-btn" title="Zoom in" onClick={() => zoomBy(1.25)}>+</button>
