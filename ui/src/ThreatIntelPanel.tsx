@@ -4,9 +4,17 @@ export interface ThreatIntelPanelProps {
   intel: ThreatIntelPayload | null
   awaiting: boolean
   hasChain: boolean
+  // Techniques the active chain actually contains are navigation: clicking
+  // one focuses the workspace on its events. Intel-only techniques (returned
+  // by enrichment but absent from the chain) stay inert reference rows.
+  onTechniqueSelect?: (techniqueId: string) => void
+  activeTechniqueId?: string | null
+  chainTechniqueIds?: string[]
 }
 
-export function ThreatIntelPanel({ intel, awaiting, hasChain }: ThreatIntelPanelProps) {
+export function ThreatIntelPanel({
+  intel, awaiting, hasChain, onTechniqueSelect, activeTechniqueId, chainTechniqueIds,
+}: ThreatIntelPanelProps) {
   if (awaiting) {
     return (
       <div className="intel-panel intel-empty">
@@ -33,17 +41,34 @@ export function ThreatIntelPanel({ intel, awaiting, hasChain }: ThreatIntelPanel
     <div className="intel-panel">
       <p className="intel-summary">{intel.summary}</p>
       <div className="intel-techniques">
-        {intel.techniques.map((t) => (
-          <div className="intel-technique" key={t.id}>
-            <div className="intel-technique-head">
-              <span className="intel-technique-id">{t.id}</span>
-              <span className="intel-technique-name">{t.name}</span>
+        {intel.techniques.map((t) => {
+          const navigable = Boolean(onTechniqueSelect) && (chainTechniqueIds ?? []).includes(t.id)
+          const active = t.id === activeTechniqueId
+          return (
+            <div className={`intel-technique${active ? ' intel-technique-active' : ''}`} key={t.id}>
+              {navigable ? (
+                <button
+                  type="button"
+                  className="intel-technique-head intel-technique-head-link"
+                  aria-pressed={active}
+                  title="Focus the investigation on this technique"
+                  onClick={() => onTechniqueSelect!(t.id)}
+                >
+                  <span className="intel-technique-id">{t.id}</span>
+                  <span className="intel-technique-name">{t.name}</span>
+                </button>
+              ) : (
+                <div className="intel-technique-head">
+                  <span className="intel-technique-id">{t.id}</span>
+                  <span className="intel-technique-name">{t.name}</span>
+                </div>
+              )}
+              <IntelRow label="Groups" items={t.groups} />
+              <IntelRow label="Tooling" items={t.software} />
+              <IntelRow label="Mitigations" items={t.mitigations} />
             </div>
-            <IntelRow label="Groups" items={t.groups} />
-            <IntelRow label="Tooling" items={t.software} />
-            <IntelRow label="Mitigations" items={t.mitigations} />
-          </div>
-        ))}
+          )
+        })}
       </div>
       {intel.cve_matches && intel.cve_matches.length > 0 && (
         <div className="intel-cves">

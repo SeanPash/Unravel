@@ -5,6 +5,11 @@ export interface AttackPanelProps {
   chain: ChainResultPayload | null
   edges: WsEdge[]
   onNodeFocus: (nodeId: string | null) => void
+  // Selecting a technique synchronizes the whole workspace around it (graph,
+  // timeline, evidence), the same focus mechanism the phase cards use. Steps
+  // without a technique fall back to plain node focus.
+  onTechniqueSelect?: (techniqueId: string) => void
+  activeTechniqueId?: string | null
 }
 
 // confidenceClass buckets a 0-1 score into a CSS modifier so cells shade from
@@ -15,7 +20,7 @@ function confidenceClass(c: number): string {
   return 'attack-step-low'
 }
 
-export function AttackPanel({ chain, edges, onNodeFocus }: AttackPanelProps) {
+export function AttackPanel({ chain, edges, onNodeFocus, onTechniqueSelect, activeTechniqueId }: AttackPanelProps) {
   if (!chain || chain.steps.length === 0) {
     return <div className="attack-empty">Waiting for chain extraction...</div>
   }
@@ -41,18 +46,25 @@ export function AttackPanel({ chain, edges, onNodeFocus }: AttackPanelProps) {
             <span className="attack-tactic-index">{ti + 1}</span>
             <span className="attack-tactic-name">{tactic}</span>
           </div>
-          {byTactic.get(tactic)!.map((s) => (
-            <button
-              key={s.event_id}
-              type="button"
-              className={`attack-step ${confidenceClass(s.confidence)}`}
-              onClick={() => onNodeFocus(nodeForEvent(edges, s.event_id))}
-              title={s.description}
-            >
-              <span className="attack-step-id">{s.technique_id}</span>
-              <span className="attack-step-name">{s.technique_name}</span>
-            </button>
-          ))}
+          {byTactic.get(tactic)!.map((s) => {
+            const active = s.technique_id !== undefined && s.technique_id === activeTechniqueId
+            return (
+              <button
+                key={s.event_id}
+                type="button"
+                className={`attack-step ${confidenceClass(s.confidence)}${active ? ' attack-step-active' : ''}`}
+                aria-pressed={active}
+                onClick={() => {
+                  if (s.technique_id && onTechniqueSelect) onTechniqueSelect(s.technique_id)
+                  else onNodeFocus(nodeForEvent(edges, s.event_id))
+                }}
+                title={s.description}
+              >
+                <span className="attack-step-id">{s.technique_id}</span>
+                <span className="attack-step-name">{s.technique_name}</span>
+              </button>
+            )
+          })}
         </div>
       ))}
       {unmapped.length > 0 && (
