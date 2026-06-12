@@ -170,11 +170,15 @@ export function reducer(state: AppState, action: Action): AppState {
       }
     }
     case 'select_incident':
+      // A context switch: the previous incident's focus, window, and node
+      // selection do not follow into the new one.
       return {
         ...state,
         activeIncidentId: action.payload,
         activeFocusId: null,
         timeWindow: null,
+        focusedNodeId: null,
+        focusedEventId: null,
       }
     case 'select_focus': {
       if (action.payload === null) {

@@ -65,6 +65,17 @@ export function Minimap({ data, onSectionClick, onJump, onHover, onHoverEnd }: M
 
   const viewport = rectOf(data.viewport)
 
+  // Outside-viewport scrim: one evenodd path covering the map with the
+  // camera's window cut out, so "where you are" reads as a bright opening
+  // in a dim field, the way every canvas minimap signals it.
+  const vx = Math.max(0, Math.min(viewport.x, MINIMAP_W))
+  const vy = Math.max(0, Math.min(viewport.y, MINIMAP_H))
+  const vx2 = Math.max(0, Math.min(viewport.x + viewport.width, MINIMAP_W))
+  const vy2 = Math.max(0, Math.min(viewport.y + viewport.height, MINIMAP_H))
+  const scrimPath =
+    `M0 0H${MINIMAP_W}V${MINIMAP_H}H0Z ` +
+    `M${vx} ${vy}H${vx2}V${vy2}H${vx}Z`
+
   return (
     <div className="graph-minimap" role="navigation" aria-label="Incident map">
       <svg
@@ -75,6 +86,12 @@ export function Minimap({ data, onSectionClick, onJump, onHover, onHoverEnd }: M
         onMouseMove={handleMouseMove}
         onMouseLeave={onHoverEnd}
       >
+        <defs>
+          <pattern id="minimap-grid" width="12" height="12" patternUnits="userSpaceOnUse">
+            <circle cx="1" cy="1" r="0.5" className="minimap-grid-dot" />
+          </pattern>
+        </defs>
+        <rect className="minimap-terrain" width={MINIMAP_W} height={MINIMAP_H} fill="url(#minimap-grid)" />
         {data.related.map(([a, b]) => {
           const sa = sectionById.get(a)
           const sb = sectionById.get(b)
@@ -111,14 +128,24 @@ export function Minimap({ data, onSectionClick, onJump, onHover, onHoverEnd }: M
             </g>
           )
         })}
+        <path className="minimap-scrim" d={scrimPath} fillRule="evenodd" />
         <rect
           className="minimap-viewport"
           x={viewport.x}
           y={viewport.y}
           width={viewport.width}
           height={viewport.height}
-          rx={2}
+          rx={1.5}
         />
+        {/* Instrument label: a tiny crosshair tick plus MAP says what this is. */}
+        <g className="minimap-maplabel" aria-hidden="true">
+          <g className="minimap-crosshair">
+            <line x1="8.5" y1="6" x2="8.5" y2="13" />
+            <line x1="5" y1="9.5" x2="12" y2="9.5" />
+            <circle cx="8.5" cy="9.5" r="2.2" />
+          </g>
+          <text x="16" y="12.5">MAP</text>
+        </g>
       </svg>
     </div>
   )

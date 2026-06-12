@@ -21,7 +21,7 @@ export interface NodeInspectorProps {
   // press, and the focused accent for the node driving the Logs tab.
   style?: React.CSSProperties
   headerProps?: React.HTMLAttributes<HTMLElement>
-  onPanelPointerDown?: () => void
+  onPanelPointerDown?: (e: React.PointerEvent) => void
   focused?: boolean
 }
 

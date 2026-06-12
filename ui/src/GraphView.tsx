@@ -338,6 +338,25 @@ const CY_STYLE = [
       'text-background-opacity': 0,
     },
   },
+  // Persistent twin of the hover highlight: while a node is focused, its
+  // closed neighborhood stays lit and the rest recedes, so the connection
+  // between the focused node and its inspector panel is always visible.
+  {
+    selector: 'node.focus-hl',
+    style: {
+      'text-opacity': 0.95,
+      'border-opacity': 0.45,
+      'label': 'data(shortLabel)',
+    },
+  },
+  {
+    selector: '.focus-dim',
+    style: {
+      'opacity': 0.14,
+      'text-opacity': 0,
+      'text-background-opacity': 0,
+    },
+  },
   { selector: '.ts-hidden', style: { 'display': 'none' } },
   // Incident sections carry no paint of their own: the spatial grid, the
   // floating label, and the focus fog (a DOM overlay) do the separating.
@@ -462,7 +481,7 @@ interface OpenInspector {
 // rows, and scrolling inside the body stay ordinary clicks.
 function DraggableInspector({
   entry, context, zIndex, focused, container,
-  onMove, onRaise, onClose, onNodeFocus, onPhaseSelect, onTechniqueSelect,
+  onMove, onSelect, onClose, onNodeFocus, onPhaseSelect, onTechniqueSelect,
 }: {
   entry: OpenInspector
   context: NodeContext
@@ -470,7 +489,7 @@ function DraggableInspector({
   focused: boolean
   container: HTMLDivElement | null
   onMove: (x: number, y: number) => void
-  onRaise: () => void
+  onSelect: (e: React.PointerEvent) => void
   onClose: () => void
   onNodeFocus: (nodeId: string) => void
   onPhaseSelect: (phase: AttackPhase) => void
@@ -482,7 +501,7 @@ function DraggableInspector({
       context={context}
       focused={focused}
       style={{ left: entry.x, top: entry.y, zIndex }}
-      onPanelPointerDown={onRaise}
+      onPanelPointerDown={onSelect}
       headerProps={{
         onPointerDown: (e) => {
           if ((e.target as HTMLElement).closest('.inspector-close')) return
@@ -720,15 +739,17 @@ export function GraphView({
         onNodeFocusRef.current?.(null)
         return
       }
-      onNodeFocusRef.current?.(target.id())
       // Tapping into another incident's cluster also makes that incident
       // active, so every panel follows the user across the map. The camera
-      // stays put; they are already looking at it.
+      // stays put; they are already looking at it. Incident first, focus
+      // second: the incident switch clears the previous focus, and the new
+      // focus must land after it.
       const incident = assignmentRef.current?.primary.get(target.id())
       if (incident !== undefined && incident !== activeIncidentIdRef.current) {
         lastFlownRef.current = incident
         onIncidentSelectRef.current?.(incident)
       }
+      onNodeFocusRef.current?.(target.id())
     })
     cy.on('tap', (e) => {
       if (e.target === cy) {
@@ -1151,16 +1172,50 @@ export function GraphView({
     }
   }, [focusedNodeId, nodes])
 
-  // Open inspector drawers: focusing a node opens its inspector (cascaded so
-  // panels stack readably); the user drags them anywhere and pins as many as
-  // they like. Pixel positions are view furniture, so they live here rather
-  // than in app state.
-  const [inspectors, setInspectors] = useState<OpenInspector[]>([])
+  // While a node is focused, hold the hover-style neighborhood highlight:
+  // its connections stay lit and everything else fades, tying the graph to
+  // the focused inspector panel. Re-applied as the graph streams so new
+  // elements pick the right side of the fade.
+  useEffect(() => {
+    const cy = cyRef.current
+    if (!cy) return
+    cy.batch(() => {
+      cy.elements().removeClass('focus-hl focus-dim')
+    })
+    if (!focusedNodeId) return
+    const target = cy.getElementById(focusedNodeId)
+    if (target.length === 0 || target.isParent()) return
+    const keep = target.closedNeighborhood()
+    cy.batch(() => {
+      cy.elements().difference(keep).not(':parent').addClass('focus-dim')
+      keep.addClass('focus-hl')
+    })
+  }, [focusedNodeId, nodes, edges])
+
+  // Open inspector drawers, kept per incident: focusing a node opens its
+  // inspector (cascaded so panels stack readably); the user drags them
+  // anywhere and pins as many as they like. Switching incidents hides the
+  // set without losing it, so returning to an incident restores its panels
+  // exactly where they were. Pixel positions are view furniture, so they
+  // live here rather than in app state.
+  const [inspectorsByIncident, setInspectorsByIncident] = useState<Record<string, OpenInspector[]>>({})
   const inspectorZRef = useRef(60)
+  const incidentKey = activeIncidentId ?? 'none'
+  const inspectors = inspectorsByIncident[incidentKey] ?? []
+
+  const updateInspectors = useCallback((key: string, updater: (cur: OpenInspector[]) => OpenInspector[]) => {
+    setInspectorsByIncident((all) => ({ ...all, [key]: updater(all[key] ?? []) }))
+  }, [])
 
   useEffect(() => {
     if (!focusedNodeId) return
-    setInspectors((cur) => {
+    // A freshly arriving incident auto-activates without clearing the
+    // analyst's focus; their focused node must not leak a panel into the
+    // new incident's set. Only file a panel under the incident that owns
+    // the node (unassigned nodes go to the current bucket).
+    const owner = assignmentRef.current?.primary.get(focusedNodeId)
+    if (owner !== undefined && activeIncidentId && owner !== activeIncidentId) return
+    updateInspectors(incidentKey, (cur) => {
       if (cur.some((i) => i.nodeId === focusedNodeId)) return cur
       const rect = containerRef.current?.getBoundingClientRect()
       const baseX = rect && rect.width > 0 ? Math.max(12, rect.width - INSPECTOR_WIDTH - 64) : 12
@@ -1173,26 +1228,17 @@ export function GraphView({
         z: inspectorZRef.current,
       }]
     })
-  }, [focusedNodeId])
-
-  // Inspectors describe nodes in the context of the active incident's chain;
-  // switching incidents retires the whole set. The ref skips the mount run,
-  // which would otherwise clear the very drawer the focus effect just opened.
-  const prevIncidentRef = useRef(activeIncidentId)
-  useEffect(() => {
-    if (prevIncidentRef.current === activeIncidentId) return
-    prevIncidentRef.current = activeIncidentId
-    setInspectors([])
-  }, [activeIncidentId])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusedNodeId, incidentKey, activeIncidentId, updateInspectors])
 
   function moveInspector(nodeId: string, x: number, y: number) {
-    setInspectors((cur) => cur.map((i) => (i.nodeId === nodeId ? { ...i, x, y } : i)))
+    updateInspectors(incidentKey, (cur) => cur.map((i) => (i.nodeId === nodeId ? { ...i, x, y } : i)))
   }
 
   // Pressing a panel raises it by bumping its z; the array (and therefore
   // the DOM) keeps insertion order.
   function raiseInspector(nodeId: string) {
-    setInspectors((cur) => {
+    updateInspectors(incidentKey, (cur) => {
       const entry = cur.find((i) => i.nodeId === nodeId)
       if (!entry || entry.z === inspectorZRef.current) return cur
       inspectorZRef.current += 1
@@ -1202,8 +1248,16 @@ export function GraphView({
   }
 
   function closeInspector(nodeId: string) {
-    setInspectors((cur) => cur.filter((i) => i.nodeId !== nodeId))
+    updateInspectors(incidentKey, (cur) => cur.filter((i) => i.nodeId !== nodeId))
     if (nodeId === focusedNodeId) onNodeFocus?.(null)
+  }
+
+  // Pressing a panel (anywhere except its buttons) hands the workspace focus
+  // to its node, so the panel, the red ring, and the Logs tab line up.
+  function selectInspector(nodeId: string, e: React.PointerEvent) {
+    raiseInspector(nodeId)
+    if ((e.target as HTMLElement).closest('button')) return
+    if (nodeId !== focusedNodeId) onNodeFocus?.(nodeId)
   }
 
   // Selected attack phase: paint members in the phase color, fade the rest,
@@ -1473,7 +1527,7 @@ export function GraphView({
             focused={entry.nodeId === focusedNodeId}
             container={containerRef.current}
             onMove={(x, y) => moveInspector(entry.nodeId, x, y)}
-            onRaise={() => raiseInspector(entry.nodeId)}
+            onSelect={(e) => selectInspector(entry.nodeId, e)}
             onClose={() => closeInspector(entry.nodeId)}
             onNodeFocus={(id) => onNodeFocus?.(id)}
             onPhaseSelect={(p) => onPhaseSelect?.(p)}

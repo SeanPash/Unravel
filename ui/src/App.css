@@ -275,37 +275,48 @@
 
 /* ─── Incident minimap ────────────────────────────────────────────────── */
 
+/* An inset instrument, not a floating decoration: crisp dark bezel, dot-grid
+   terrain, severity-tinted incident clusters, and a bright camera window cut
+   out of a dim scrim, the convention every canvas minimap shares. */
 .graph-minimap {
   position: absolute;
   z-index: 50;
   left: var(--space-3);
   top: var(--space-3);
-  padding: 6px;
-  background: linear-gradient(170deg, rgba(26, 33, 40, 0.88), rgba(13, 17, 21, 0.88));
-  border: 1px solid rgba(79, 167, 217, 0.14);
-  border-radius: calc(var(--radius) + 3px);
+  padding: 4px;
+  background: rgba(12, 13, 16, 0.88);
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
   box-shadow:
     0 4px 18px rgba(0, 0, 0, 0.45),
     inset 0 1px 0 rgba(221, 227, 233, 0.04);
-  backdrop-filter: blur(5px);
   line-height: 0;
 }
 
 .graph-minimap svg {
   cursor: crosshair;
+  border-radius: 3px;
+}
+
+.minimap-grid-dot {
+  fill: rgba(138, 153, 168, 0.14);
+}
+
+.minimap-terrain {
+  pointer-events: none;
 }
 
 .minimap-section ellipse {
-  fill: rgba(44, 58, 71, 0.35);
-  stroke: rgba(70, 83, 95, 0.55);
+  fill: rgba(79, 167, 217, 0.12);
+  stroke: rgba(110, 138, 160, 0.6);
   stroke-width: 1;
   cursor: pointer;
   transition: fill 0.12s ease, stroke 0.12s ease;
 }
 
 .minimap-section:hover ellipse {
-  fill: rgba(79, 167, 217, 0.2);
-  stroke: rgba(79, 167, 217, 0.7);
+  fill: rgba(79, 167, 217, 0.24);
+  stroke: rgba(79, 167, 217, 0.85);
 }
 
 .minimap-section text {
@@ -318,9 +329,11 @@
   user-select: none;
 }
 
+/* The active incident wears the same red accent it carries everywhere else. */
 .minimap-section-active ellipse {
-  fill: rgba(79, 167, 217, 0.18);
-  stroke: rgba(79, 167, 217, 0.8);
+  fill: rgba(220, 78, 65, 0.16);
+  stroke: rgba(220, 78, 65, 0.85);
+  filter: drop-shadow(0 0 2px rgba(220, 78, 65, 0.5));
 }
 
 .minimap-section-active text {
@@ -328,20 +341,59 @@
 }
 
 .minimap-related {
-  stroke: #46535f;
+  stroke: rgba(138, 153, 168, 0.25);
   stroke-width: 1;
-  stroke-dasharray: 3 3;
 }
 
 .minimap-dot {
-  fill: #46535f;
+  fill: rgba(138, 153, 168, 0.55);
+}
+
+/* Everything off-camera sits behind the scrim; the cutout is the window. */
+.minimap-scrim {
+  fill: rgba(8, 9, 12, 0.62);
+  pointer-events: none;
+  transition: fill 0.15s ease;
+}
+
+.graph-minimap:hover .minimap-scrim {
+  fill: rgba(8, 9, 12, 0.5);
 }
 
 .minimap-viewport {
-  fill: rgba(221, 227, 233, 0.05);
-  stroke: rgba(221, 227, 233, 0.65);
-  stroke-width: 1;
+  fill: rgba(79, 167, 217, 0.06);
+  stroke: var(--accent-blue-bright);
+  stroke-width: 1.25;
   pointer-events: none;
+  transition: x 0.08s ease-out, y 0.08s ease-out, width 0.08s ease-out, height 0.08s ease-out;
+}
+
+.graph-minimap:hover .minimap-viewport {
+  stroke-width: 1.5;
+  filter: drop-shadow(0 0 3px rgba(79, 167, 217, 0.5));
+}
+
+.minimap-maplabel {
+  pointer-events: none;
+}
+
+.minimap-maplabel text {
+  fill: rgba(138, 153, 168, 0.7);
+  font-family: var(--font-display);
+  font-size: 8px;
+  letter-spacing: 0.12em;
+  user-select: none;
+}
+
+.minimap-crosshair line {
+  stroke: rgba(138, 153, 168, 0.55);
+  stroke-width: 1;
+}
+
+.minimap-crosshair circle {
+  fill: none;
+  stroke: rgba(138, 153, 168, 0.55);
+  stroke-width: 1;
 }
 
 /* Node kind legend */
