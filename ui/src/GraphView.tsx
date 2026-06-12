@@ -1086,7 +1086,14 @@ export function GraphView({
       cy.elements().removeClass('phase-member phase-dim')
     })
     if (!phaseFocus) {
-      flownPhaseRef.current = null
+      // Deselecting a focus hands the camera back to the focused incident's
+      // framing, exactly like the fit-focused control, so the click-out
+      // always lands somewhere deliberate rather than mid-zoom.
+      if (flownPhaseRef.current !== null) {
+        flownPhaseRef.current = null
+        const incidentId = activeIncidentIdRef.current
+        if (incidentId) flyToSection(incidentId)
+      }
       return
     }
 
@@ -1112,7 +1119,7 @@ export function GraphView({
         complete: () => { animatingRef.current = false },
       })
     }
-  }, [phaseFocus])
+  }, [phaseFocus, flyToSection])
 
   // Show/hide edges based on time window. Hidden edges stay in the
   // simulation on purpose so node positions hold still while scrubbing.

@@ -46,22 +46,25 @@ export function AttackPanel({ chain, edges, onNodeFocus, onTechniqueSelect, acti
             <span className="attack-tactic-index">{ti + 1}</span>
             <span className="attack-tactic-name">{tactic}</span>
           </div>
-          {byTactic.get(tactic)!.map((s) => {
-            const active = s.technique_id !== undefined && s.technique_id === activeTechniqueId
+          {groupByTechnique(byTactic.get(tactic)!).map((g) => {
+            const active = g.techniqueId !== undefined && g.techniqueId === activeTechniqueId
             return (
               <button
-                key={s.event_id}
+                key={g.techniqueId ?? g.steps[0].event_id}
                 type="button"
-                className={`attack-step ${confidenceClass(s.confidence)}${active ? ' attack-step-active' : ''}`}
+                className={`attack-step ${confidenceClass(g.confidence)}${active ? ' attack-step-active' : ''}`}
                 aria-pressed={active}
                 onClick={() => {
-                  if (s.technique_id && onTechniqueSelect) onTechniqueSelect(s.technique_id)
-                  else onNodeFocus(nodeForEvent(edges, s.event_id))
+                  if (g.techniqueId && onTechniqueSelect) onTechniqueSelect(g.techniqueId)
+                  else onNodeFocus(nodeForEvent(edges, g.steps[0].event_id))
                 }}
-                title={s.description}
+                title={g.steps.map((s) => s.description).join('\n')}
               >
-                <span className="attack-step-id">{s.technique_id}</span>
-                <span className="attack-step-name">{s.technique_name}</span>
+                <span className="attack-step-id">{g.techniqueId}</span>
+                <span className="attack-step-name">{g.steps[0].technique_name}</span>
+                {g.steps.length > 1 && (
+                  <span className="attack-step-count">{g.steps.length} events</span>
+                )}
               </button>
             )
           })}
@@ -85,6 +88,37 @@ export function AttackPanel({ chain, edges, onNodeFocus, onTechniqueSelect, acti
       )}
     </div>
   )
+}
+
+interface TechniqueGroup {
+  techniqueId?: string
+  steps: ChainStep[]
+  // Strongest observation of the technique, shading the cell.
+  confidence: number
+}
+
+// One cell per technique within a tactic: a technique observed by several
+// chain steps (e.g. two LSASS reads) is a single entry with an event count,
+// not a duplicated row. Steps with no technique stay one cell each.
+function groupByTechnique(steps: ChainStep[]): TechniqueGroup[] {
+  const order: TechniqueGroup[] = []
+  const byId = new Map<string, TechniqueGroup>()
+  for (const s of steps) {
+    if (!s.technique_id) {
+      order.push({ steps: [s], confidence: s.confidence })
+      continue
+    }
+    const existing = byId.get(s.technique_id)
+    if (existing) {
+      existing.steps.push(s)
+      existing.confidence = Math.max(existing.confidence, s.confidence)
+    } else {
+      const g: TechniqueGroup = { techniqueId: s.technique_id, steps: [s], confidence: s.confidence }
+      byId.set(s.technique_id, g)
+      order.push(g)
+    }
+  }
+  return order
 }
 
 function distinctTactics(steps: ChainStep[]): string[] {
