@@ -173,8 +173,9 @@ const systemPrompt = `You are an incident-response analyst writing concise summa
 {
   "confidence": <float 0-1>,
   "steps": [
-    { "event_id": <string>, "description": <string>, "confidence": <float>, "ts": <unix seconds> }
-  ]
+    { "event_id": <string>, "description": <string>, "confidence": <float>, "ts": <unix seconds>, "tactic": <optional MITRE ATT&CK tactic name> }
+  ],
+  "tactics": [<optional ordered MITRE ATT&CK tactic names>]
 }
 
 You MUST respond with a single JSON object, no surrounding prose, matching exactly this schema:
@@ -182,10 +183,15 @@ You MUST respond with a single JSON object, no surrounding prose, matching exact
 {
   "text": <string, 2-4 sentence narrative summary>,
   "hypotheses": [<string>, ...],
-  "actions": [<string>, ...]
+  "actions": [<string>, ...],
+  "phases": [
+    { "id": <string>, "title": <string>, "summary": <string, 1-2 sentence summary of this phase> }
+  ]
 }
 
-Keep the narrative concrete and grounded in the supplied steps. Hypotheses are claims that go beyond the observed evidence; actions are short imperative containment steps an oncall responder can take immediately.`
+Keep the narrative concrete and grounded in the supplied steps. Hypotheses are claims that go beyond the observed evidence; actions are short imperative containment steps an oncall responder can take immediately.
+
+The phases array must contain exactly one entry per distinct tactic among the steps (or, when no step carries a tactic, per entry of the top-level tactics list), in chronological order. Each phase id must be the kebab-case form of the tactic name (for example "Credential Access" becomes "credential-access"); the title is the tactic name as given. Phase summaries describe only what that phase's steps show. Do not invent node identifiers, edge identifiers, timestamps, or confidence values; the engine attaches those to each phase itself.`
 
 const maxRounds = 3
 
@@ -357,7 +363,7 @@ func extractText(r claudeResponse) string {
 	return strings.TrimSpace(b.String())
 }
 
-// parseNarration is permissive — Claude occasionally wraps its JSON in a
+// parseNarration is permissive: Claude occasionally wraps its JSON in a
 // markdown code fence even when told not to, so we strip fences before
 // decoding.
 func parseNarration(text string) (types.NarrationPayload, error) {

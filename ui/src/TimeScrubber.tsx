@@ -28,6 +28,9 @@ export interface TimeScrubberProps {
   // External request (e.g. a click on a log row) to select the event at ts.
   // seq increments per request so repeated jumps to the same ts re-fire.
   jump?: { ts: number; seq: number } | null
+  // Tactic name of the selected attack phase card, so its timeline segment
+  // answers with the same emphasis.
+  activePhaseName?: string | null
 }
 
 const NEUTRAL_MARKER = '#6e7c8c'
@@ -41,7 +44,7 @@ const PLAY_INTERVAL_MS = 1200
 
 interface TickTooltip { ts: number; x: number; y: number }
 
-export function TimeScrubber({ minTs, maxTs, window, onChange, edges, chain, onEventFocus, jump }: TimeScrubberProps) {
+export function TimeScrubber({ minTs, maxTs, window, onChange, edges, chain, onEventFocus, jump, activePhaseName }: TimeScrubberProps) {
   // The rail zooms to the active incident's span; events from other
   // incidents in the same feed fall outside and are not drawn. The incident
   // list is the navigation between incidents.
@@ -242,7 +245,7 @@ export function TimeScrubber({ minTs, maxTs, window, onChange, edges, chain, onE
               <button
                 key={p.name}
                 type="button"
-                className="timeline-phase"
+                className={`timeline-phase${p.name === activePhaseName ? ' timeline-phase-active' : ''}`}
                 style={{
                   left: `${leftPct}%`,
                   width: `${widthPct}%`,

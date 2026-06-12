@@ -69,11 +69,21 @@ export interface ThreatIntelPayload {
   cve_matches?: CVEMatch[]
 }
 
+// Per-phase AI enrichment. The narrator only writes prose; the structural
+// truth of a phase (nodes, edges, timestamps, confidence) is derived from the
+// chain by the engine and never by the model.
+export interface NarrationPhase {
+  id: string
+  title: string
+  summary: string
+}
+
 export interface NarrationPayload {
   incident_id?: string
   text: string
   hypotheses: string[]
   actions: string[]
+  phases?: NarrationPhase[]
 }
 
 export interface LogEventPayload {

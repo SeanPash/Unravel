@@ -22,6 +22,16 @@ export interface GraphViewProps {
   incidents?: IncidentRef[]
   activeIncidentId?: string | null
   onIncidentSelect?: (incidentId: string) => void
+  // Selected attack phase: its members light up in the phase color, the rest
+  // of the graph fades back, and the camera frames the phase subgraph.
+  phaseFocus?: PhaseFocus | null
+}
+
+export interface PhaseFocus {
+  id: string
+  nodeIds: string[]
+  edgeIds: string[]
+  color: string
 }
 
 // --- Pure helpers (exported for unit tests) ---
@@ -355,6 +365,34 @@ const CY_STYLE = [
   // The bridge between two incidents stays hidden until a node touching it
   // is hovered, keeping the resting map quiet.
   { selector: '.bridge-hidden', style: { 'display': 'none' } },
+  // Selected attack phase: members wear the phase color (set as data when the
+  // phase is applied), everything else recedes without leaving the layout.
+  {
+    selector: 'node.phase-member',
+    style: {
+      'border-width': 3,
+      'border-color': 'data(phaseColor)',
+      'border-opacity': 0.95,
+      'text-opacity': 0.95,
+      'label': 'data(shortLabel)',
+    },
+  },
+  {
+    selector: 'edge.phase-member',
+    style: {
+      'line-color': 'data(phaseColor)',
+      'target-arrow-color': 'data(phaseColor)',
+      'opacity': 1,
+    },
+  },
+  {
+    selector: '.phase-dim',
+    style: {
+      'opacity': 0.12,
+      'text-opacity': 0,
+      'text-background-opacity': 0,
+    },
+  },
 ] as cytoscape.StylesheetJson
 
 // Edges that bridge two incident sections stay long so the simulation does
@@ -407,7 +445,7 @@ interface EdgeTooltip {
 
 export function GraphView({
   nodes, edges, chain, timeWindow, focusedNodeId, onNodeFocus,
-  incidents, activeIncidentId, onIncidentSelect,
+  incidents, activeIncidentId, onIncidentSelect, phaseFocus,
 }: GraphViewProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const cyRef = useRef<Core | null>(null)
@@ -1035,6 +1073,46 @@ export function GraphView({
       if (el.length > 0) el.addClass('focused')
     }
   }, [focusedNodeId, nodes])
+
+  // Selected attack phase: paint members in the phase color, fade the rest,
+  // and frame the phase subgraph. The flown ref dedupes the camera move so
+  // streaming graph updates re-apply classes without re-yanking the view.
+  const flownPhaseRef = useRef<string | null>(null)
+  useEffect(() => {
+    const cy = cyRef.current
+    if (!cy) return
+
+    cy.batch(() => {
+      cy.elements().removeClass('phase-member phase-dim')
+    })
+    if (!phaseFocus) {
+      flownPhaseRef.current = null
+      return
+    }
+
+    const members = cy.collection()
+    for (const id of [...phaseFocus.nodeIds, ...phaseFocus.edgeIds]) {
+      members.merge(cy.getElementById(id))
+    }
+    cy.batch(() => {
+      members.forEach((el) => { el.data('phaseColor', phaseFocus.color) })
+      members.addClass('phase-member')
+      cy.elements().not(members).not(':parent').addClass('phase-dim')
+    })
+
+    const memberNodes = members.nodes()
+    if (memberNodes.length > 0 && flownPhaseRef.current !== phaseFocus.id) {
+      flownPhaseRef.current = phaseFocus.id
+      cy.stop()
+      animatingRef.current = true
+      cy.animate({
+        fit: { eles: memberNodes, padding: 90 },
+        duration: 450,
+        easing: 'ease-in-out-cubic',
+        complete: () => { animatingRef.current = false },
+      })
+    }
+  }, [phaseFocus])
 
   // Show/hide edges based on time window. Hidden edges stay in the
   // simulation on purpose so node positions hold still while scrubbing.

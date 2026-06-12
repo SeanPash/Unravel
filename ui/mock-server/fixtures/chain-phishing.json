@@ -150,6 +150,12 @@
         "Reset credentials for NORTHPOLE\\Administrator and all accounts with recent Kerberos activity from WS01",
         "Search for lateral movement originating from DC01 after timestamp 1749100090",
         "Revoke all active Kerberos tickets issued to WS01 in the affected window"
+      ],
+      "phases": [
+        { "id": "initial-access", "title": "Initial Access", "summary": "A macro-enabled Office document opened on WS01 spawned a hidden, encoded PowerShell process." },
+        { "id": "credential-access", "title": "Credential Access", "summary": "The PowerShell process read LSASS memory and extracted credential material for NORTHPOLE\\Administrator." },
+        { "id": "lateral-movement", "title": "Lateral Movement", "summary": "The stolen Kerberos ticket authenticated to DC01 as the domain administrator, a textbook pass-the-ticket move." },
+        { "id": "privilege-escalation", "title": "Privilege Escalation", "summary": "The session on DC01 was granted SeDebug and SeTcb privileges, confirming full domain admin control." }
       ]
     }
   },
@@ -215,7 +221,11 @@
       "incident_id": "inc-1",
       "text": "A second intrusion on WS02: a macro-laden Office document spawned PowerShell, which launched rundll32.exe, a common signed-binary proxy-execution pattern.",
       "hypotheses": ["The rundll32 invocation may side-load a malicious DLL not yet captured by image-load telemetry"],
-      "actions": ["Capture the rundll32 command line on WS02", "Isolate WS02 pending review"]
+      "actions": ["Capture the rundll32 command line on WS02", "Isolate WS02 pending review"],
+      "phases": [
+        { "id": "execution", "title": "Execution", "summary": "A macro-laden Office document on WS02 spawned PowerShell under the asmith account." },
+        { "id": "defense-evasion", "title": "Defense Evasion", "summary": "PowerShell launched rundll32.exe, hiding the payload behind a signed Windows binary." }
+      ]
     }
   },
   {

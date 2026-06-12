@@ -1,8 +1,10 @@
-import { useEffect, useReducer, useRef } from 'react'
+import { useEffect, useMemo, useReducer, useRef } from 'react'
 import { EngineSocket } from './ws'
 import type { GraphUpdatePayload, ScoreUpdatePayload, ChainResultPayload, NarrationPayload, WsNode, WsEdge, LogEventPayload, ThreatIntelPayload } from './ws'
 import { GraphView } from './GraphView'
-import { NarrationPanel } from './NarrationPanel'
+import { PhasePanel } from './PhasePanel'
+import { buildAttackPhases } from './attackPhases'
+import type { AttackPhase } from './attackPhases'
 import { TimeScrubber } from './TimeScrubber'
 import { DetailTabs, type DetailTab } from './DetailTabs'
 import { IncidentList } from './IncidentList'
@@ -43,6 +45,8 @@ export interface AppState {
   activeTab: DetailTab
   incidents: Record<string, IncidentState>
   activeIncidentId: string | null
+  // Selected attack phase card (kebab-case tactic id) of the active incident.
+  activePhaseId: string | null
 }
 
 export type Action =
@@ -60,6 +64,7 @@ export type Action =
   | { type: 'threat_intel'; payload: ThreatIntelPayload }
   | { type: 'set_tab'; payload: DetailTab }
   | { type: 'select_incident'; payload: string }
+  | { type: 'select_phase'; payload: { id: string; endTs: number } | null }
 
 export const initialState: AppState = {
   nodes: {},
@@ -73,6 +78,7 @@ export const initialState: AppState = {
   activeTab: 'logs',
   incidents: {},
   activeIncidentId: null,
+  activePhaseId: null,
 }
 
 function incidentIdOf(payload: { incident_id?: string }): string {
@@ -161,7 +167,28 @@ export function reducer(state: AppState, action: Action): AppState {
       }
     }
     case 'select_incident':
-      return { ...state, activeIncidentId: action.payload }
+      return {
+        ...state,
+        activeIncidentId: action.payload,
+        activePhaseId: null,
+        timeWindow: null,
+      }
+    case 'select_phase': {
+      if (action.payload === null) {
+        return { ...state, activePhaseId: null, timeWindow: null }
+      }
+      // Selecting a phase tells the story up to that point: the window ends
+      // at the phase's last event, so the graph shows the attack as of that
+      // phase and the evidence below is scoped to it.
+      return {
+        ...state,
+        activePhaseId: action.payload.id,
+        timeWindow: [0, action.payload.endTs],
+        focusedNodeId: null,
+        focusedEventId: null,
+        activeTab: 'logs',
+      }
+    }
     case 'connected':
       return { ...state, status: 'live' }
     case 'disconnected':
@@ -214,8 +241,30 @@ export default function App() {
   const minTs = edgeTimestamps.length > 0 ? Math.min(...edgeTimestamps) : 0
   const maxTs = edgeTimestamps.length > 0 ? Math.max(...edgeTimestamps) : 0
 
+  // Attack phase cards: structure from the chain, prose from the narration.
+  const attackPhases = useMemo(
+    () => buildAttackPhases(activeChain, edges, active?.narration ?? null),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [activeChain, state.edges, active?.narration],
+  )
+  const activePhase = attackPhases.find((p) => p.id === state.activePhaseId) ?? null
+  const phaseFocus = useMemo(
+    () => activePhase
+      ? { id: activePhase.id, nodeIds: activePhase.nodeIds, edgeIds: activePhase.edgeIds, color: activePhase.color }
+      : null,
+    [activePhase],
+  )
+
+  function handlePhaseSelect(phase: AttackPhase | null) {
+    dispatch({
+      type: 'select_phase',
+      payload: phase === null ? null : { id: phase.id, endTs: phase.endTs },
+    })
+  }
+
   const relatedLogs = selectRelatedLogs(
     state.logs, edges, activeChain, state.focusedNodeId, state.timeWindow, state.focusedEventId,
+    activePhase?.eventIds ?? null,
   )
   const focusedStep = state.focusedEventId !== null
     ? activeChain?.steps.find((s) => s.event_id === state.focusedEventId) ?? null
@@ -267,6 +316,7 @@ export default function App() {
                 incidents={incidents}
                 activeIncidentId={state.activeIncidentId}
                 onIncidentSelect={(id) => dispatch({ type: 'select_incident', payload: id })}
+                phaseFocus={phaseFocus}
               />
               {edges.length > 0 && (
                 <TimeScrubber
@@ -276,6 +326,7 @@ export default function App() {
                   edges={edges}
                   chain={activeChain}
                   jump={state.timelineJump}
+                  activePhaseName={activePhase?.title ?? null}
                   onChange={(w) => dispatch({ type: 'set_time_window', payload: w })}
                   onEventFocus={(nodeId, eventId) => {
                     if (nodeId !== null) {
@@ -293,11 +344,14 @@ export default function App() {
             </div>
           </section>
           <aside className="dash-panel narration-pane">
-            <div className="dash-panel-title">AI Narration</div>
+            <div className="dash-panel-title">Attack Phases</div>
             <div className="dash-panel-body narration-pane-body">
-              <NarrationPanel
+              <PhasePanel
+                phases={attackPhases}
+                activePhaseId={state.activePhaseId}
                 narration={active?.narration ?? null}
                 awaitingNarration={active?.awaitingNarration ?? false}
+                onPhaseSelect={handlePhaseSelect}
               />
             </div>
           </aside>

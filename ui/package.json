@@ -13,6 +13,7 @@
     "mock": "tsx mock-server/server.ts"
   },
   "dependencies": {
+    "@phosphor-icons/react": "^2.1.10",
     "cytoscape": "^3.34.0",
     "cytoscape-cola": "^2.5.1",
     "react": "^18.3.1",

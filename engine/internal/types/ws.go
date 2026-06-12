@@ -44,11 +44,22 @@ type ChainResultPayload struct {
 	Tactics       []string    `json:"tactics,omitempty"`
 }
 
+// NarrationPhase is the AI's prose for one attack phase. Only the id, title,
+// and summary come from the model; everything structural about a phase
+// (nodes, edges, timestamps, confidence) is derived from the chain by the
+// UI so the model cannot hallucinate graph references.
+type NarrationPhase struct {
+	ID      string `json:"id"`
+	Title   string `json:"title"`
+	Summary string `json:"summary"`
+}
+
 type NarrationPayload struct {
-	IncidentID string   `json:"incident_id,omitempty"`
-	Text       string   `json:"text"`
-	Hypotheses []string `json:"hypotheses"`
-	Actions    []string `json:"actions"`
+	IncidentID string           `json:"incident_id,omitempty"`
+	Text       string           `json:"text"`
+	Hypotheses []string         `json:"hypotheses"`
+	Actions    []string         `json:"actions"`
+	Phases     []NarrationPhase `json:"phases,omitempty"`
 }
 
 // LogEventPayload carries the raw Splunk event behind a graph edge so the UI
