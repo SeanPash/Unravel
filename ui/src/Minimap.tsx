@@ -34,11 +34,14 @@ export interface MinimapProps {
   // world point under the cursor, then once when the cursor leaves.
   onHover: (worldX: number, worldY: number) => void
   onHoverEnd: () => void
+  // The incident section under the cursor while scrubbing (null between
+  // sections), so the host can preview that incident's overlays.
+  onHoverIncident?: (incidentId: string | null) => void
 }
 
 const center = (r: Rect) => ({ x: (r.x1 + r.x2) / 2, y: (r.y1 + r.y2) / 2 })
 
-export function Minimap({ data, onSectionClick, onJump, onHover, onHoverEnd }: MinimapProps) {
+export function Minimap({ data, onSectionClick, onJump, onHover, onHoverEnd, onHoverIncident }: MinimapProps) {
   const t = minimapTransform(data.world, MINIMAP_W, MINIMAP_H, MINIMAP_PAD)
   const sectionById = new Map(data.sections.map((s) => [s.id, s]))
 
@@ -61,6 +64,12 @@ export function Minimap({ data, onSectionClick, onJump, onHover, onHoverEnd }: M
   function handleMouseMove(e: React.MouseEvent<SVGSVGElement>) {
     const p = worldPoint(e)
     onHover(p.x, p.y)
+    if (onHoverIncident) {
+      const section = data.sections.find(
+        (s) => p.x >= s.bb.x1 && p.x <= s.bb.x2 && p.y >= s.bb.y1 && p.y <= s.bb.y2,
+      )
+      onHoverIncident(section?.id ?? null)
+    }
   }
 
   const viewport = rectOf(data.viewport)
@@ -78,7 +87,16 @@ export function Minimap({ data, onSectionClick, onJump, onHover, onHoverEnd }: M
 
   return (
     <div className="graph-minimap" role="navigation" aria-label="Incident map">
+      <div className="minimap-titlebar">
+        <svg width="9" height="9" viewBox="0 0 9 9" aria-hidden="true" className="minimap-crosshair">
+          <line x1="4.5" y1="0.5" x2="4.5" y2="8.5" />
+          <line x1="0.5" y1="4.5" x2="8.5" y2="4.5" />
+          <circle cx="4.5" cy="4.5" r="2.4" />
+        </svg>
+        <span>MAP</span>
+      </div>
       <svg
+        className="minimap-canvas"
         width={MINIMAP_W}
         height={MINIMAP_H}
         viewBox={`0 0 ${MINIMAP_W} ${MINIMAP_H}`}
@@ -137,15 +155,6 @@ export function Minimap({ data, onSectionClick, onJump, onHover, onHoverEnd }: M
           height={viewport.height}
           rx={1.5}
         />
-        {/* Instrument label: a tiny crosshair tick plus MAP says what this is. */}
-        <g className="minimap-maplabel" aria-hidden="true">
-          <g className="minimap-crosshair">
-            <line x1="8.5" y1="6" x2="8.5" y2="13" />
-            <line x1="5" y1="9.5" x2="12" y2="9.5" />
-            <circle cx="8.5" cy="9.5" r="2.2" />
-          </g>
-          <text x="16" y="12.5">MAP</text>
-        </g>
       </svg>
     </div>
   )

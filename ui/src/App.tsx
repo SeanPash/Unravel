@@ -311,11 +311,22 @@ export default function App() {
   }
 
   // Investigation context builder for the graph's inspector drawers. The
-  // view keeps one drawer per pinned node, so it asks per node id.
+  // view keeps one drawer per pinned node, so it asks per node id; when it
+  // previews another incident's panels (minimap hover), the context is
+  // computed against that incident's chain so the role text stays true.
   const getNodeContext = useCallback(
-    (nodeId: string) => buildNodeContext(nodeId, state.nodes, edges, activeChain, attackPhases, techniqueFoci),
+    (nodeId: string, incidentId?: string) => {
+      if (incidentId && incidentId !== state.activeIncidentId) {
+        const incident = state.incidents[incidentId]
+        const chain = incident?.chain ?? null
+        const phases = buildAttackPhases(chain, edges, incident?.narration ?? null)
+        const foci = buildTechniqueFoci(chain, edges, phases)
+        return buildNodeContext(nodeId, state.nodes, edges, chain, phases, foci)
+      }
+      return buildNodeContext(nodeId, state.nodes, edges, activeChain, attackPhases, techniqueFoci)
+    },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [state.nodes, state.edges, activeChain, attackPhases, techniqueFoci],
+    [state.nodes, state.edges, state.incidents, state.activeIncidentId, activeChain, attackPhases, techniqueFoci],
   )
 
   const relatedLogs = selectRelatedLogs(

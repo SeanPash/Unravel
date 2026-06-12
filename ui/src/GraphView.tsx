@@ -29,9 +29,11 @@ export interface GraphViewProps {
   // of the graph fades back, and the camera frames the phase subgraph.
   phaseFocus?: PhaseFocus | null
   // Builds the investigation context for any node id, so the view can keep
-  // several inspector drawers open at once. Chip and relation clicks route
+  // several inspector drawers open at once. The optional incident id makes
+  // the context describe that incident's chain (used when previewing another
+  // incident's panels from the minimap). Chip and relation clicks route
   // back into the app's focus machinery via the two select callbacks.
-  getNodeContext?: (nodeId: string) => NodeContext | null
+  getNodeContext?: (nodeId: string, incidentId?: string) => NodeContext | null
   onPhaseSelect?: (phase: AttackPhase) => void
   onTechniqueSelect?: (techniqueId: string) => void
 }
@@ -1201,7 +1203,12 @@ export function GraphView({
   const [inspectorsByIncident, setInspectorsByIncident] = useState<Record<string, OpenInspector[]>>({})
   const inspectorZRef = useRef(60)
   const incidentKey = activeIncidentId ?? 'none'
-  const inspectors = inspectorsByIncident[incidentKey] ?? []
+  // While the minimap hover sits over another incident's section, that
+  // incident's panel set previews in place of the active one, so the panels
+  // on screen always belong to the incident under the cursor.
+  const [previewIncidentId, setPreviewIncidentId] = useState<string | null>(null)
+  const displayKey = previewIncidentId ?? incidentKey
+  const inspectors = inspectorsByIncident[displayKey] ?? []
 
   const updateInspectors = useCallback((key: string, updater: (cur: OpenInspector[]) => OpenInspector[]) => {
     setInspectorsByIncident((all) => ({ ...all, [key]: updater(all[key] ?? []) }))
@@ -1232,13 +1239,13 @@ export function GraphView({
   }, [focusedNodeId, incidentKey, activeIncidentId, updateInspectors])
 
   function moveInspector(nodeId: string, x: number, y: number) {
-    updateInspectors(incidentKey, (cur) => cur.map((i) => (i.nodeId === nodeId ? { ...i, x, y } : i)))
+    updateInspectors(displayKey, (cur) => cur.map((i) => (i.nodeId === nodeId ? { ...i, x, y } : i)))
   }
 
   // Pressing a panel raises it by bumping its z; the array (and therefore
   // the DOM) keeps insertion order.
   function raiseInspector(nodeId: string) {
-    updateInspectors(incidentKey, (cur) => {
+    updateInspectors(displayKey, (cur) => {
       const entry = cur.find((i) => i.nodeId === nodeId)
       if (!entry || entry.z === inspectorZRef.current) return cur
       inspectorZRef.current += 1
@@ -1248,7 +1255,7 @@ export function GraphView({
   }
 
   function closeInspector(nodeId: string) {
-    updateInspectors(incidentKey, (cur) => cur.filter((i) => i.nodeId !== nodeId))
+    updateInspectors(displayKey, (cur) => cur.filter((i) => i.nodeId !== nodeId))
     if (nodeId === focusedNodeId) onNodeFocus?.(null)
   }
 
@@ -1431,10 +1438,17 @@ export function GraphView({
   }
 
   function handleMiniHoverEnd() {
+    setPreviewIncidentId(null)
     if (!miniScrubRef.current) return
     miniScrubRef.current = false
     animatingRef.current = false
     snapToNearest()
+  }
+
+  // Preview only when the hovered section is a different incident; hovering
+  // home ground or open map shows the active incident's own panels.
+  function handleMiniHoverIncident(incidentId: string | null) {
+    setPreviewIncidentId(incidentId !== null && incidentId !== incidentKey ? incidentId : null)
   }
 
   function handleMiniSection(incidentId: string) {
@@ -1461,6 +1475,7 @@ export function GraphView({
           onJump={handleMiniJump}
           onHover={handleMiniHover}
           onHoverEnd={handleMiniHoverEnd}
+          onHoverIncident={handleMiniHoverIncident}
         />
       )}
       <div className="graph-controls">
@@ -1516,7 +1531,7 @@ export function GraphView({
         ))}
       </div>
       {getNodeContext && inspectors.map((entry) => {
-        const ctx = getNodeContext(entry.nodeId)
+        const ctx = getNodeContext(entry.nodeId, previewIncidentId ?? activeIncidentId ?? undefined)
         if (!ctx) return null
         return (
           <DraggableInspector
