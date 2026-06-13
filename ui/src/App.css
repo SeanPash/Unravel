@@ -2036,6 +2036,44 @@ button.intel-technique-head-link:hover .intel-technique-name {
   font-style: italic;
 }
 
+/* Live status line: running lookup/source count and an elapsed timer while the
+   agents are working, a completion summary when they finish. */
+.trace-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 12px;
+  padding: 7px 10px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--bg-elevated);
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.trace-status-busy {
+  border-color: var(--accent-blue-bright);
+  color: var(--text-bright, var(--text-muted));
+}
+
+.trace-status-text { flex: 1; min-width: 0; }
+
+.trace-status-time {
+  font-family: var(--font-display);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.04em;
+  color: var(--accent-blue-bright);
+}
+
+.trace-status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent-blue-bright);
+  flex: none;
+  animation: trace-blink 1.1s ease-in-out infinite;
+}
+
 .trace-feed {
   list-style: none;
   margin: 0;
@@ -2051,19 +2089,70 @@ button.intel-technique-head-link:hover .intel-technique-name {
   border-radius: var(--radius);
   padding: 8px 12px;
   background: var(--bg-elevated);
+  /* New rows slide in so the feed visibly grows as the agent works. Keyed list
+     identity means existing rows keep their DOM node and do not re-animate. */
+  animation: trace-in 0.28s ease-out both;
 }
 
-.trace-step-pending { border-left-color: var(--accent-blue-bright); }
+.trace-step-pending {
+  border-left-color: var(--accent-blue-bright);
+  /* Entrance once, then a soft ongoing pulse while the lookup is in flight. */
+  animation: trace-in 0.28s ease-out both, trace-pulse 1.6s ease-in-out 0.3s infinite;
+}
 .trace-step-ok { border-left-color: var(--accent-green); }
 .trace-step-empty { border-left-color: var(--text-faint); }
 .trace-step-error { border-left-color: var(--accent-red); }
 .trace-step-kind-done { border-left-color: var(--accent-purple); }
+
+@keyframes trace-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
+}
+
+@keyframes trace-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(96, 165, 250, 0); }
+  50% { box-shadow: 0 0 0 2px rgba(96, 165, 250, 0.18); }
+}
+
+@keyframes trace-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
 
 .trace-step-head {
   display: flex;
   gap: 8px;
   align-items: baseline;
   flex-wrap: wrap;
+}
+
+/* Per-row agent tag so the two agents reading in parallel are distinguishable. */
+.trace-agent {
+  font-family: var(--font-display);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  border-radius: 2px;
+  padding: 1px 5px;
+  white-space: nowrap;
+}
+
+.trace-agent-narrator {
+  color: var(--accent-purple);
+  border: 1px solid var(--accent-purple);
+}
+
+.trace-agent-intel {
+  color: var(--accent-green);
+  border: 1px solid var(--accent-green);
+}
+
+/* Respect users who prefer no motion: keep the panel readable, drop animation. */
+@media (prefers-reduced-motion: reduce) {
+  .trace-step,
+  .trace-step-pending { animation: none; }
+  .trace-status-dot { animation: none; }
 }
 
 .trace-source {

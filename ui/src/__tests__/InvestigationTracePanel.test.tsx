@@ -68,4 +68,40 @@ describe('InvestigationTracePanel', () => {
     )
     expect(getByText('flagged malicious')).toBeTruthy()
   })
+
+  it('shows a live investigating status with lookup and source counts while busy', () => {
+    const { getByText } = render(
+      <InvestigationTracePanel activity={[call({ seq: 0, kind: 'tool_call' })]} busy hasChain />,
+    )
+    expect(getByText(/Investigating - 1 lookup across 1 source/)).toBeTruthy()
+  })
+
+  it('shows a completion summary when the agents are done', () => {
+    const { getByText } = render(
+      <InvestigationTracePanel
+        activity={[
+          call({ seq: 0, kind: 'tool_call' }),
+          call({ seq: 1, kind: 'tool_result', detail: 'flagged malicious', status: 'ok' }),
+        ]}
+        busy={false}
+        hasChain
+      />,
+    )
+    expect(getByText(/Investigation complete - 1 lookup across 1 source/)).toBeTruthy()
+  })
+
+  it('tags steps with the agent that produced them', () => {
+    const { getByText } = render(
+      <InvestigationTracePanel
+        activity={[
+          call({ seq: 0, kind: 'tool_call', agent: 'narrator' }),
+          call({ seq: 0, kind: 'tool_call', agent: 'intel', tool: 'lookup_kev', source: 'CISA KEV', label: 'KEV' }),
+        ]}
+        busy
+        hasChain
+      />,
+    )
+    expect(getByText('Narrator')).toBeTruthy()
+    expect(getByText('Threat Intel')).toBeTruthy()
+  })
 })
