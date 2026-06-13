@@ -113,6 +113,16 @@ cd engine
   --insecure
 ```
 
+To route the narrator's Splunk enrichment through the official Splunk MCP Server instead of the REST search endpoint, add `--splunk-mcp-url` and `--splunk-mcp-token`. The MCP token is a separate per-app encrypted credential, not the same as `--splunk-token`.
+
+```bash
+cd engine
+./engine --mode=live \
+  --splunk-mcp-url=https://<splunk-host>/<mcp-endpoint> \
+  --splunk-mcp-token=<mcp-encrypted-token> \
+  --anthropic-key=$ANTHROPIC_API_KEY --insecure
+```
+
 `--insecure` skips TLS verification for the self-signed certs that GOAD and most lab Splunk installs use. Drop it for an instance with a CA-signed certificate. The `--hec-*` flags are optional; leave them off and the engine simply won't write findings back to Splunk.
 
 ## The lab
