@@ -504,8 +504,8 @@ func TestIsReadOnlySPL(t *testing.T) {
 func TestSplunkSearchActivityLabels(t *testing.T) {
 	t.Parallel()
 	label, source := toolCallActivity("splunk_search", map[string]any{"spl": "search index=sysmon EventCode=1"})
-	if source != "Splunk MCP Server" {
-		t.Errorf("source = %q, want %q", source, "Splunk MCP Server")
+	if source != "Splunk" {
+		t.Errorf("source = %q, want %q", source, "Splunk")
 	}
 	if !strings.Contains(label, "index=sysmon") {
 		t.Errorf("label = %q, want it to mention the SPL", label)
@@ -519,5 +519,48 @@ func TestSplunkSearchActivityLabels(t *testing.T) {
 	emptyDetail, emptyStatus := toolResultActivity("splunk_search", `{"rows":[]}`)
 	if emptyStatus != "empty" || emptyDetail == "" {
 		t.Errorf("empty result = %q/%q, want non-empty detail with status empty", emptyDetail, emptyStatus)
+	}
+}
+
+func TestClaudeNarratorSplunkSearchSourceUsesSearcherName(t *testing.T) {
+	t.Parallel()
+	var callCount atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		callCount.Add(1)
+		if callCount.Load() == 1 {
+			_ = json.NewEncoder(w).Encode(claudeResponse{
+				StopReason: "tool_use",
+				Content: []claudeContentBlock{
+					{Type: "tool_use", ID: "tu_1", Name: "splunk_search", Input: map[string]any{"spl": "search index=sysmon"}},
+				},
+			})
+			return
+		}
+		_ = json.NewEncoder(w).Encode(claudeResponse{
+			StopReason: "end_turn",
+			Content:    []claudeContentBlock{{Type: "text", Text: `{"text":"done.","hypotheses":[],"actions":[]}`}},
+		})
+	}))
+	defer srv.Close()
+
+	n := NewClaude(ClaudeConfig{
+		APIKey:       "k",
+		BaseURL:      srv.URL,
+		SearcherName: "Splunk MCP Server",
+		Searcher: &fakeSearcher{fn: func(_ context.Context, _ string) ([]map[string]any, error) {
+			return []map[string]any{{"a": 1}}, nil
+		}},
+	})
+
+	var got []types.AgentActivityPayload
+	emit := func(a types.AgentActivityPayload) { got = append(got, a) }
+	if _, err := n.Narrate(context.Background(), types.ChainResultPayload{}, emit); err != nil {
+		t.Fatalf("narrate: %v", err)
+	}
+	if len(got) == 0 || got[0].Tool != "splunk_search" {
+		t.Fatalf("first activity = %+v, want splunk_search tool_call", got)
+	}
+	if got[0].Source != "Splunk MCP Server" {
+		t.Errorf("source = %q, want override %q", got[0].Source, "Splunk MCP Server")
 	}
 }
