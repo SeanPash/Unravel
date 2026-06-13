@@ -125,7 +125,7 @@ func (p *Pipeline) handleRaw(raw splunk.RawEvent) {
 	for _, u := range updates {
 		p.broadcastGraphUpdate(u.node, u.edge)
 		score := p.cfg.Scorer.ScoreEdge(u.edge, p.cfg.Graph)
-		u.edge.Confidence = score
+		p.cfg.Graph.SetEdgeConfidence(u.edge.ID, score)
 		p.broadcastScore(u.edge.ID, score)
 	}
 	if len(updates) > 0 {
@@ -216,12 +216,11 @@ func (p *Pipeline) consumeSignals(ctx context.Context) {
 }
 
 func (p *Pipeline) handleSignal(ctx context.Context, sig scorer.Signal) {
-	scoreFn := func(edgeID string) float64 {
-		if e := p.cfg.Graph.Edge(edgeID); e != nil {
-			return e.Confidence
-		}
-		return 0
-	}
+	// EdgeScore reads the scorer's own mutex-guarded edgeScores map, so chain
+	// extraction (this goroutine) never races the ingest goroutine's writes to
+	// edge.Confidence. In production both hold the same value: handleRaw records
+	// the score into the scorer and onto the edge via SetEdgeConfidence.
+	scoreFn := p.cfg.Scorer.EdgeScore
 	result := chain.Extract(p.cfg.Graph, scoreFn, sig.HotNode)
 	if len(result.Steps) == 0 {
 		return

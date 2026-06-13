@@ -65,7 +65,11 @@ func TestExtract_PicksHighestScoredIncomingEdge(t *testing.T) {
 	}
 }
 
-// Chain confidence is the geometric mean of per-step confidences.
+// Chain confidence is the geometric mean of per-step confidences. A step's
+// confidence is the value the passed scoreFn returns for its edge, not the
+// edge's stored Confidence field: chain extraction reads scores through the
+// scorer's mutex-guarded accessor to stay race-free with ingest. The stored
+// AppendEdge confidences below are therefore deliberately irrelevant.
 func TestExtract_ConfidenceIsGeometricMeanOfSteps(t *testing.T) {
 	g := graph.New()
 
@@ -73,10 +77,10 @@ func TestExtract_ConfidenceIsGeometricMeanOfSteps(t *testing.T) {
 	b := g.FindOrCreateNode(types.NodeKindProcess, "b", "b", nil)
 	c := g.FindOrCreateNode(types.NodeKindProcess, "c", "c", nil)
 
-	e1 := g.AppendEdge(a, b, types.EdgeKindSpawned, time.Unix(100, 0).UTC(), 0.81, "evt-1")
-	e2 := g.AppendEdge(b, c, types.EdgeKindSpawned, time.Unix(200, 0).UTC(), 0.64, "evt-2")
+	e1 := g.AppendEdge(a, b, types.EdgeKindSpawned, time.Unix(100, 0).UTC(), 0, "evt-1")
+	e2 := g.AppendEdge(b, c, types.EdgeKindSpawned, time.Unix(200, 0).UTC(), 0, "evt-2")
 
-	scores := map[string]float64{e1.ID: 1, e2.ID: 1}
+	scores := map[string]float64{e1.ID: 0.81, e2.ID: 0.64}
 	scoreFn := func(edgeID string) float64 { return scores[edgeID] }
 
 	result := Extract(g, scoreFn, c.ID)
