@@ -71,19 +71,24 @@ func (b *bearerRoundTripper) RoundTrip(req *http.Request) (*http.Response, error
 	return b.base.RoundTrip(req)
 }
 
-// parseMCPRows extracts the search rows from a splunk_run_query result. The
-// Splunk MCP Server returns rows as JSON text, either a bare array or wrapped in
-// {"results": [...]} (the same shape RESTSearcher decodes). A tool-error payload
-// that is not valid row JSON surfaces as a parse error, which the narrator maps
-// to a graceful "search unavailable" tool result.
-func parseMCPRows(res *mcp.CallToolResult) ([]map[string]any, error) {
+// mcpText concatenates the text from a result's TextContent blocks.
+func mcpText(res *mcp.CallToolResult) string {
 	var sb strings.Builder
 	for _, c := range res.Content {
 		if tc, ok := c.(*mcp.TextContent); ok {
 			sb.WriteString(tc.Text)
 		}
 	}
-	text := strings.TrimSpace(sb.String())
+	return sb.String()
+}
+
+// parseMCPRows extracts the search rows from a splunk_run_query result. The
+// Splunk MCP Server returns rows as JSON text, either a bare array or wrapped in
+// {"results": [...]} (the same shape RESTSearcher decodes). A tool-error payload
+// that is not valid row JSON surfaces as a parse error, which the narrator maps
+// to a graceful "search unavailable" tool result.
+func parseMCPRows(res *mcp.CallToolResult) ([]map[string]any, error) {
+	text := strings.TrimSpace(mcpText(res))
 	if text == "" {
 		return []map[string]any{}, nil
 	}
@@ -137,6 +142,12 @@ func (m *MCPSearcher) Search(ctx context.Context, query string) ([]map[string]an
 		// Drop it so the next Search reconnects rather than failing forever.
 		m.dropSession(sess)
 		return nil, fmt.Errorf("mcp call %s: %w", runQueryTool, err)
+	}
+	if res.IsError {
+		// A tool-level error (e.g. malformed SPL) is not a transport failure, so
+		// the session stays healthy; surface it as an error for graceful upstream
+		// degradation rather than parsing the error text as rows.
+		return nil, fmt.Errorf("mcp tool %s error: %s", runQueryTool, strings.TrimSpace(mcpText(res)))
 	}
 	return parseMCPRows(res)
 }
