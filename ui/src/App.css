@@ -318,11 +318,11 @@
 
 .minimap-canvas {
   display: block;
-  cursor: grab;
+  cursor: crosshair;
 }
 
 .minimap-canvas:active {
-  cursor: grabbing;
+  cursor: crosshair;
 }
 
 .minimap-grid-dot {
