@@ -25,22 +25,24 @@ import (
 )
 
 type config struct {
-	mode          string
-	bind          string
-	port          int
-	replaySpeed   float64
-	testdataDir   string
-	splunkURL     string
-	splunkToken   string
-	splunkQuery   string
-	insecure      bool
-	threshold     float64
-	apiKey        string
-	nvdKey        string
-	hecURL        string
-	hecToken      string
-	hecIndex      string
-	hecSourcetype string
+	mode           string
+	bind           string
+	port           int
+	replaySpeed    float64
+	testdataDir    string
+	splunkURL      string
+	splunkToken    string
+	splunkQuery    string
+	splunkMCPURL   string
+	splunkMCPToken string
+	insecure       bool
+	threshold      float64
+	apiKey         string
+	nvdKey         string
+	hecURL         string
+	hecToken       string
+	hecIndex       string
+	hecSourcetype  string
 }
 
 func main() {
@@ -64,6 +66,8 @@ func parseFlags() config {
 	flag.StringVar(&cfg.splunkURL, "splunk-url", "https://localhost:8089", "Splunk REST base URL (live mode)")
 	flag.StringVar(&cfg.splunkToken, "splunk-token", "", "Splunk bearer token (live mode)")
 	flag.StringVar(&cfg.splunkQuery, "splunk-search", "search index=sysmon", "Splunk search expression (live mode)")
+	flag.StringVar(&cfg.splunkMCPURL, "splunk-mcp-url", "", "Splunk MCP Server endpoint URL; when set in live mode, narrator enrichment runs through the MCP server instead of REST")
+	flag.StringVar(&cfg.splunkMCPToken, "splunk-mcp-token", "", "Splunk MCP Server bearer token (required when --splunk-mcp-url is set)")
 	flag.BoolVar(&cfg.insecure, "insecure", false, "skip TLS verification for the Splunk endpoint")
 	flag.Float64Var(&cfg.threshold, "threshold", 0.5, "scorer trigger threshold")
 	flag.StringVar(&cfg.apiKey, "anthropic-key", os.Getenv("ANTHROPIC_API_KEY"), "Anthropic API key (omit to fall back to stub narrator)")
@@ -211,8 +215,13 @@ func buildNarrator(cfg config, logger *slog.Logger) ai.Narrator {
 	var searcher ai.SplunkSearcher
 	switch cfg.mode {
 	case "live":
-		searcher = splunk.NewRESTSearcher(cfg.splunkURL, cfg.splunkToken, cfg.insecure)
-		logger.Info("narrator enrichment enabled", "splunk_url", cfg.splunkURL)
+		if cfg.splunkMCPURL != "" {
+			searcher = splunk.NewMCPSearcher(cfg.splunkMCPURL, cfg.splunkMCPToken, cfg.insecure)
+			logger.Info("narrator enrichment via Splunk MCP Server", "mcp_url", cfg.splunkMCPURL)
+		} else {
+			searcher = splunk.NewRESTSearcher(cfg.splunkURL, cfg.splunkToken, cfg.insecure)
+			logger.Info("narrator enrichment enabled", "splunk_url", cfg.splunkURL)
+		}
 	default:
 		searcher = splunk.NewMockSearcher(cfg.testdataDir)
 		logger.Info("narrator enrichment using mock fixtures", "testdata_dir", cfg.testdataDir)
@@ -261,4 +270,3 @@ func discoverTimelines(dir string) ([]string, error) {
 	}
 	return out, nil
 }
-
