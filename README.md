@@ -123,6 +123,8 @@ cd engine
   --anthropic-key=$ANTHROPIC_API_KEY --insecure
 ```
 
+When MCP enrichment is enabled, the narrator can also call `splunk_nl_search`: it asks the Splunk MCP Server's AI Assistant (`saia_generate_spl`) to turn a natural-language question into SPL, then runs that SPL through `splunk_run_query`. The activity feed shows both sub-steps: the AI Assistant writing the SPL, then the MCP server running it. The tool appears only in live+MCP mode and requires the Splunk AI Assistant to be enabled on the instance.
+
 `--insecure` skips TLS verification for the self-signed certs that GOAD and most lab Splunk installs use. Drop it for an instance with a CA-signed certificate. The `--hec-*` flags are optional; leave them off and the engine simply won't write findings back to Splunk.
 
 ## The lab
