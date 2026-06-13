@@ -39,7 +39,7 @@ func Extract(g *graph.Graph, score ScoreFn, hotNodeID string) types.ChainResultP
 		reverse = append(reverse, types.ChainStep{
 			EventID:       best.SourceEventID,
 			Description:   describe(src, dst, best.Kind),
-			Confidence:    best.Confidence,
+			Confidence:    score(best.ID),
 			TS:            best.TS,
 			TechniqueID:   tech.ID,
 			TechniqueName: tech.Name,

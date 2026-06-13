@@ -119,6 +119,16 @@ func (s *Scorer) ScoreEdge(e *types.Edge, g *graph.Graph) float64 {
 	return score
 }
 
+// EdgeScore returns the scorer's recorded suspicion score for an edge, reading
+// the edgeScores map under the scorer mutex. Chain extraction uses this as its
+// ScoreFn so the backward walk never races the ingest goroutine's writes to
+// edge.Confidence; an unscored edge reads as 0.
+func (s *Scorer) EdgeScore(edgeID string) float64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.edgeScores[edgeID]
+}
+
 // freqRarity is the unigram term. The (parent_image, child_image) tuple for
 // spawn edges and the (src_role, dst_role, auth_kind) tuple for auth edges are
 // counted; the score is 1 / log(1 + count_after_increment) so the first

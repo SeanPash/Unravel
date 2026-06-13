@@ -114,6 +114,17 @@ func (g *Graph) Edge(id string) *types.Edge {
 	return g.edges[id]
 }
 
+// SetEdgeConfidence records the scorer's verdict on an edge under the graph
+// lock so concurrent readers (chain extraction, snapshots) never observe a
+// torn or racing write.
+func (g *Graph) SetEdgeConfidence(edgeID string, score float64) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if e, ok := g.edges[edgeID]; ok {
+		e.Confidence = score
+	}
+}
+
 // InEdges returns a copy of the incoming edge slice for the given node. Used by
 // the chain extractor's backward walk.
 func (g *Graph) InEdges(nodeID string) []*types.Edge {
