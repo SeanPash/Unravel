@@ -27,6 +27,9 @@ func toolCallActivity(tool string, input map[string]any) (label, source string) 
 		return fmt.Sprintf("Searching CISA KEV for %q", strFromInput(input, "keyword", "")), "CISA KEV"
 	case "search_cve":
 		return fmt.Sprintf("Searching NVD for %q", strFromInput(input, "keyword", "")), "NVD"
+	case "splunk_search":
+		return fmt.Sprintf("Running ad-hoc SPL: %s", truncate(strFromInput(input, "spl", "a search"), 80)),
+			"Splunk MCP Server"
 	default:
 		return "Running " + tool, ""
 	}
@@ -102,6 +105,12 @@ func toolResultActivity(tool, content string) (detail, status string) {
 			}
 		}
 		return fmt.Sprintf("%d match(es)", len(matches)), "ok"
+	case "splunk_search":
+		rows := toSlice(obj["rows"])
+		if len(rows) == 0 {
+			return "no results", "empty"
+		}
+		return fmt.Sprintf("%d result row(s)", len(rows)), "ok"
 	default:
 		return "completed", "ok"
 	}
@@ -112,6 +121,16 @@ func strFromInput(input map[string]any, key, fallback string) string {
 		return s
 	}
 	return fallback
+}
+
+// truncate shortens s to at most n runes, appending an ellipsis marker when it
+// trims, so long ad-hoc SPL stays readable in the activity feed.
+func truncate(s string, n int) string {
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	return string(r[:n]) + "..."
 }
 
 func eventIDsLabel(input map[string]any) string {
