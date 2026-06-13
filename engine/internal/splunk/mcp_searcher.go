@@ -107,6 +107,32 @@ func parseMCPRows(res *mcp.CallToolResult) ([]map[string]any, error) {
 	return rows, nil
 }
 
+// generatedSPLFields are the JSON keys saia_generate_spl might wrap the SPL in,
+// tried in order. The tool may instead return bare SPL text with no wrapper.
+var generatedSPLFields = []string{"spl", "query", "search"}
+
+// extractGeneratedSPL pulls the SPL out of a saia_generate_spl result body. The
+// Splunk AI Assistant's output shape is not contractually fixed, so this is
+// tolerant: a JSON object carrying a non-empty spl/query/search field wins; a
+// body that is not a JSON object is treated as bare SPL. Empty input, or a JSON
+// object with no recognized field, is an error so a blob is never run as SPL.
+func extractGeneratedSPL(text string) (string, error) {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return "", fmt.Errorf("ai assistant returned no spl")
+	}
+	var obj map[string]any
+	if err := json.Unmarshal([]byte(text), &obj); err == nil {
+		for _, k := range generatedSPLFields {
+			if s, ok := obj[k].(string); ok && strings.TrimSpace(s) != "" {
+				return strings.TrimSpace(s), nil
+			}
+		}
+		return "", fmt.Errorf("ai assistant result has no spl field")
+	}
+	return text, nil
+}
+
 // ensureSession lazily connects and reuses one MCP session across calls. One
 // MCPSearcher instance serves concurrent incidents, so the session is created
 // once under the mutex.

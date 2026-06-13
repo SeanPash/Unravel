@@ -52,6 +52,41 @@ func TestParseMCPRowsGarbageIsError(t *testing.T) {
 	}
 }
 
+func TestExtractGeneratedSPL(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name    string
+		in      string
+		want    string
+		wantErr bool
+	}{
+		{"spl field", `{"spl":"search index=sysmon EventCode=1 | head 5"}`, "search index=sysmon EventCode=1 | head 5", false},
+		{"query field", `{"query":"search index=winsec"}`, "search index=winsec", false},
+		{"search field", `{"search":"search index=x"}`, "search index=x", false},
+		{"bare spl text", "search index=sysmon EventCode=1 | head 5", "search index=sysmon EventCode=1 | head 5", false},
+		{"whitespace trimmed", "  search index=x  ", "search index=x", false},
+		{"empty", "   ", "", true},
+		{"json object without spl field", `{"foo":"bar"}`, "", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := extractGeneratedSPL(tc.in)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("want error, got spl %q", got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got != tc.want {
+				t.Errorf("got %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 // runQueryArgs is the typed argument the fake MCP server's splunk_run_query
 // tool receives. It mirrors the {"query": <spl>} arguments MCPSearcher sends.
 type runQueryArgs struct {
