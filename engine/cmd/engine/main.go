@@ -213,20 +213,24 @@ func buildNarrator(cfg config, logger *slog.Logger) ai.Narrator {
 		return ai.NewStub()
 	}
 	var searcher ai.SplunkSearcher
+	var searcherName string
 	switch cfg.mode {
 	case "live":
 		if cfg.splunkMCPURL != "" {
 			searcher = splunk.NewMCPSearcher(cfg.splunkMCPURL, cfg.splunkMCPToken, cfg.insecure)
+			searcherName = "Splunk MCP Server"
 			logger.Info("narrator enrichment via Splunk MCP Server", "mcp_url", cfg.splunkMCPURL)
 		} else {
 			searcher = splunk.NewRESTSearcher(cfg.splunkURL, cfg.splunkToken, cfg.insecure)
+			searcherName = "Splunk REST API"
 			logger.Info("narrator enrichment enabled", "splunk_url", cfg.splunkURL)
 		}
 	default:
 		searcher = splunk.NewMockSearcher(cfg.testdataDir)
+		searcherName = "Splunk (replay fixtures)"
 		logger.Info("narrator enrichment using mock fixtures", "testdata_dir", cfg.testdataDir)
 	}
-	return ai.NewClaude(ai.ClaudeConfig{APIKey: cfg.apiKey, Searcher: searcher})
+	return ai.NewClaude(ai.ClaudeConfig{APIKey: cfg.apiKey, Searcher: searcher, SearcherName: searcherName})
 }
 
 // buildIntelAgent mirrors buildNarrator: ai-off or a missing API key yields the

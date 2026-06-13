@@ -31,6 +31,10 @@ type ClaudeConfig struct {
 	HTTPClient *http.Client
 	MaxTokens  int
 	Searcher   SplunkSearcher
+	// SearcherName is the human label for the active Splunk backend (e.g.
+	// "Splunk MCP Server"), used as the activity source for the splunk_search
+	// tool so the feed honestly names the backend in use. Empty is fine.
+	SearcherName string
 }
 
 // ClaudeNarrator calls the Anthropic Messages API with prompt caching enabled
@@ -119,6 +123,9 @@ func (c *ClaudeNarrator) Narrate(ctx context.Context, chain types.ChainResultPay
 				continue
 			}
 			label, source := toolCallActivity(b.Name, b.Input)
+			if b.Name == "splunk_search" && c.cfg.SearcherName != "" {
+				source = c.cfg.SearcherName
+			}
 			emit.emit(types.AgentActivityPayload{Kind: "tool_call", Tool: b.Name, Source: source, Label: label})
 			content := c.dispatchTool(ctx, b.Name, b.Input)
 			detail, status := toolResultActivity(b.Name, content)

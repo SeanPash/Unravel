@@ -29,7 +29,7 @@ func toolCallActivity(tool string, input map[string]any) (label, source string) 
 		return fmt.Sprintf("Searching NVD for %q", strFromInput(input, "keyword", "")), "NVD"
 	case "splunk_search":
 		return fmt.Sprintf("Running ad-hoc SPL: %s", truncate(strFromInput(input, "spl", "a search"), 80)),
-			"Splunk MCP Server"
+			"Splunk"
 	default:
 		return "Running " + tool, ""
 	}
