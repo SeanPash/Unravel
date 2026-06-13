@@ -224,8 +224,8 @@ func TestClaudeNarratorToolUseLoop(t *testing.T) {
 			t.Fatalf("decode request: %v", err)
 		}
 		if callCount.Load() == 1 {
-			if len(reqBody.Tools) != 3 {
-				t.Errorf("tools = %d, want 3", len(reqBody.Tools))
+			if len(reqBody.Tools) != 4 {
+				t.Errorf("tools = %d, want 4", len(reqBody.Tools))
 			}
 			_ = json.NewEncoder(w).Encode(claudeResponse{
 				StopReason: "tool_use",
@@ -426,5 +426,73 @@ func TestClaudeNarratorMaxRoundsExceeded(t *testing.T) {
 	}
 	if int(callCount.Load()) != maxRounds {
 		t.Errorf("API calls = %d, want %d", callCount.Load(), maxRounds)
+	}
+}
+
+func TestDispatchToolSplunkSearchPassthrough(t *testing.T) {
+	t.Parallel()
+	var gotQuery string
+	n := NewClaude(ClaudeConfig{
+		APIKey: "k",
+		Searcher: &fakeSearcher{fn: func(_ context.Context, q string) ([]map[string]any, error) {
+			gotQuery = q
+			return []map[string]any{{"EventCode": "1", "Image": "powershell.exe"}}, nil
+		}},
+	})
+	spl := `search index=sysmon EventCode=1 Image=*powershell* | head 20`
+	result := n.dispatchTool(context.Background(), "splunk_search", map[string]any{"spl": spl})
+	if gotQuery != spl {
+		t.Errorf("query = %q, want passthrough %q", gotQuery, spl)
+	}
+	if !strings.Contains(result, "powershell.exe") {
+		t.Errorf("result = %q, want powershell.exe", result)
+	}
+}
+
+func TestDispatchToolSplunkSearchRejectsMutating(t *testing.T) {
+	t.Parallel()
+	called := false
+	n := NewClaude(ClaudeConfig{
+		APIKey: "k",
+		Searcher: &fakeSearcher{fn: func(_ context.Context, _ string) ([]map[string]any, error) {
+			called = true
+			return nil, nil
+		}},
+	})
+	result := n.dispatchTool(context.Background(), "splunk_search", map[string]any{"spl": `search index=x | delete`})
+	if called {
+		t.Error("searcher must not run for a mutating SPL command")
+	}
+	if !strings.Contains(result, "read-only") {
+		t.Errorf("result = %q, want a read-only refusal", result)
+	}
+}
+
+func TestIsReadOnlySPL(t *testing.T) {
+	t.Parallel()
+	readOnly := []string{
+		`search index=sysmon EventCode=1`,
+		`search index=winsec | stats count by Account_Name`,
+		`| tstats count where index=sysmon by host`,
+	}
+	for _, q := range readOnly {
+		if !isReadOnlySPL(q) {
+			t.Errorf("isReadOnlySPL(%q) = false, want true", q)
+		}
+	}
+	mutating := []string{
+		`search index=x | delete`,
+		`search index=x | outputlookup evil.csv`,
+		`search index=x | collect index=staging`,
+		`search foo | sendalert pager`,
+		`search x | OUTPUTCSV dump`,
+		`search index=x |  delete`,
+		`search index=x |` + "\t" + `outputlookup foo`,
+		`search index=x | Delete`,
+	}
+	for _, q := range mutating {
+		if isReadOnlySPL(q) {
+			t.Errorf("isReadOnlySPL(%q) = true, want false", q)
+		}
 	}
 }

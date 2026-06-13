@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"regexp"
 	"strings"
 	"time"
 
@@ -246,6 +247,17 @@ var narratorTools = []claudeTool{
 			Required: []string{"event_ids"},
 		},
 	},
+	{
+		Name:        "splunk_search",
+		Description: "Run an arbitrary read-only SPL search against Splunk to gather additional evidence not covered by the other tools.",
+		InputSchema: claudeToolSchema{
+			Type: "object",
+			Properties: map[string]claudeSchemaProperty{
+				"spl": {Type: "string", Description: "A complete read-only SPL search, e.g. search index=sysmon EventCode=1 Image=*powershell* | head 20"},
+			},
+			Required: []string{"spl"},
+		},
+	},
 }
 
 // dispatchTool builds the SPL for name, runs it via the configured Searcher,
@@ -303,9 +315,40 @@ func buildSPL(name string, input map[string]any) (string, error) {
 			strings.Join(parts, " OR "),
 		), nil
 
+	case "splunk_search":
+		spl, _ := input["spl"].(string)
+		spl = strings.TrimSpace(spl)
+		if spl == "" {
+			return "", fmt.Errorf("missing spl")
+		}
+		if !isReadOnlySPL(spl) {
+			return "", fmt.Errorf("refused: only read-only SPL is permitted")
+		}
+		return spl, nil
+
 	default:
 		return "", fmt.Errorf("unknown tool: %s", name)
 	}
+}
+
+// pipeWS matches a pipe followed by any run of whitespace, so SPL command
+// boundaries normalize to a bare "|cmd" regardless of spacing.
+var pipeWS = regexp.MustCompile(`\|\s+`)
+
+// isReadOnlySPL rejects SPL containing mutating or side-effecting commands. It
+// normalizes whitespace after each pipe first, so "|  delete" and "| delete"
+// both match. The Splunk MCP Server also validates input; this guard is
+// defense-in-depth at the AI seam so the model cannot drive a destructive
+// search through splunk_search.
+func isReadOnlySPL(spl string) bool {
+	normalized := pipeWS.ReplaceAllString(strings.ToLower(spl), "|")
+	banned := []string{"|delete", "|outputlookup", "|outputcsv", "|collect", "|sendalert"}
+	for _, b := range banned {
+		if strings.Contains(normalized, b) {
+			return false
+		}
+	}
+	return true
 }
 
 type claudeCacheControl struct {
