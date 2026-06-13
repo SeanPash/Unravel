@@ -496,3 +496,24 @@ func TestIsReadOnlySPL(t *testing.T) {
 		}
 	}
 }
+
+func TestSplunkSearchActivityLabels(t *testing.T) {
+	t.Parallel()
+	label, source := toolCallActivity("splunk_search", map[string]any{"spl": "search index=sysmon EventCode=1"})
+	if source != "Splunk MCP Server" {
+		t.Errorf("source = %q, want %q", source, "Splunk MCP Server")
+	}
+	if !strings.Contains(label, "index=sysmon") {
+		t.Errorf("label = %q, want it to mention the SPL", label)
+	}
+
+	detail, status := toolResultActivity("splunk_search", `{"rows":[{"a":1},{"b":2}]}`)
+	if status != "ok" || !strings.Contains(detail, "2") {
+		t.Errorf("detail/status = %q/%q, want ok with row count 2", detail, status)
+	}
+
+	emptyDetail, emptyStatus := toolResultActivity("splunk_search", `{"rows":[]}`)
+	if emptyStatus != "empty" || emptyDetail == "" {
+		t.Errorf("empty result = %q/%q, want non-empty detail with status empty", emptyDetail, emptyStatus)
+	}
+}
