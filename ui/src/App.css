@@ -993,17 +993,24 @@
 }
 
 .timeline-live-btn.active {
-  animation: live-pulse 1.8s ease-out infinite;
+  animation: live-broadcast 1.8s ease-out infinite;
 }
 
-@keyframes live-pulse {
+/* Renamed from live-pulse: a second @keyframes of the same name (App.css ~207)
+   was silently overriding the graph title dot's intended scale/opacity pulse,
+   since CSS keyframe names are global and the last definition wins. Distinct
+   names keep both animations playing their own frames. */
+@keyframes live-broadcast {
   0% { box-shadow: 0 0 0 0 rgba(240, 180, 41, 0.4); }
   70% { box-shadow: 0 0 0 5px rgba(240, 180, 41, 0); }
   100% { box-shadow: 0 0 0 0 rgba(240, 180, 41, 0); }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .timeline-live-btn.active { animation: none; }
+  .timeline-live-btn.active,
+  .graph-pane .dash-panel-title::after,
+  .narration-spinner,
+  .intel-spinner { animation: none; }
 }
 
 /* Marker hover tooltip */
