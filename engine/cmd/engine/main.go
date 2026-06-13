@@ -205,6 +205,10 @@ func buildHEC(cfg config, logger *slog.Logger) (pipeline.HECSink, error) {
 	return client, nil
 }
 
+// MCPSearcher is the only SplunkSearcher that also generates SPL via the Splunk
+// AI Assistant; this binding is what gates the narrator's splunk_nl_search tool.
+var _ ai.SPLGenerator = (*splunk.MCPSearcher)(nil)
+
 func buildNarrator(cfg config, logger *slog.Logger) ai.Narrator {
 	if cfg.mode == "ai-off" || cfg.apiKey == "" {
 		if cfg.mode != "ai-off" {
