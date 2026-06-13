@@ -14,9 +14,10 @@ import (
 
 // ThreatIntelAgent enriches a finished chain with external threat intelligence.
 // Like Narrator, it is the AI seam: structured engine output in, structured
-// findings out. Implementations own their own timeouts.
+// findings out. Implementations own their own timeouts. emit streams the
+// agent's tool-use steps as they happen and may be nil.
 type ThreatIntelAgent interface {
-	Enrich(ctx context.Context, chain types.ChainResultPayload) (types.ThreatIntelPayload, error)
+	Enrich(ctx context.Context, chain types.ChainResultPayload, emit ActivityFunc) (types.ThreatIntelPayload, error)
 }
 
 // chainTechniques returns the distinct technique IDs in chain order.
@@ -52,7 +53,8 @@ type DeterministicIntelAgent struct{}
 
 func NewDeterministicIntel() *DeterministicIntelAgent { return &DeterministicIntelAgent{} }
 
-func (a *DeterministicIntelAgent) Enrich(_ context.Context, chain types.ChainResultPayload) (types.ThreatIntelPayload, error) {
+func (a *DeterministicIntelAgent) Enrich(_ context.Context, chain types.ChainResultPayload, emit ActivityFunc) (types.ThreatIntelPayload, error) {
+	emit.emit(types.AgentActivityPayload{Kind: "done", Label: "ATT&CK snapshot only (no live enrichment)", Source: "MITRE ATT&CK"})
 	ids := chainTechniques(chain)
 	techs := make([]types.ThreatIntelTechnique, 0, len(ids))
 	for _, id := range ids {
@@ -157,7 +159,7 @@ var intelTools = []claudeTool{
 	},
 }
 
-func (a *ClaudeIntelAgent) Enrich(ctx context.Context, chain types.ChainResultPayload) (types.ThreatIntelPayload, error) {
+func (a *ClaudeIntelAgent) Enrich(ctx context.Context, chain types.ChainResultPayload, emit ActivityFunc) (types.ThreatIntelPayload, error) {
 	chainJSON, err := json.Marshal(chain)
 	if err != nil {
 		return types.ThreatIntelPayload{}, fmt.Errorf("marshal chain: %w", err)
@@ -187,7 +189,12 @@ func (a *ClaudeIntelAgent) Enrich(ctx context.Context, chain types.ChainResultPa
 			}
 		}
 		if !hasToolUse {
-			return parseIntel(extractText(resp))
+			payload, perr := parseIntel(extractText(resp))
+			if perr != nil {
+				return types.ThreatIntelPayload{}, perr
+			}
+			emit.emit(types.AgentActivityPayload{Kind: "done", Label: "Threat-intel correlation ready"})
+			return payload, nil
 		}
 
 		messages = append(messages, claudeMessage{Role: "assistant", Content: resp.Content})
@@ -196,10 +203,15 @@ func (a *ClaudeIntelAgent) Enrich(ctx context.Context, chain types.ChainResultPa
 			if b.Type != "tool_use" {
 				continue
 			}
+			label, source := toolCallActivity(b.Name, b.Input)
+			emit.emit(types.AgentActivityPayload{Kind: "tool_call", Tool: b.Name, Source: source, Label: label})
+			content := a.dispatchIntelTool(ctx, b.Name, b.Input)
+			detail, status := toolResultActivity(b.Name, content)
+			emit.emit(types.AgentActivityPayload{Kind: "tool_result", Tool: b.Name, Source: source, Label: label, Detail: detail, Status: status})
 			results = append(results, claudeContentBlock{
 				Type:      "tool_result",
 				ToolUseID: b.ID,
-				Content:   a.dispatchIntelTool(ctx, b.Name, b.Input),
+				Content:   content,
 			})
 		}
 		messages = append(messages, claudeMessage{Role: "user", Content: results})

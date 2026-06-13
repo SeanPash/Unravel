@@ -137,6 +137,46 @@
     }
   },
   {
+    "type": "agent_activity",
+    "payload": { "incident_id": "inc-0", "agent": "narrator", "seq": 0, "kind": "tool_call", "tool": "lookup_process_reputation", "source": "Splunk threat_intel index", "label": "Checking lsass.exe against local threat intel" }
+  },
+  {
+    "type": "agent_activity",
+    "payload": { "incident_id": "inc-0", "agent": "narrator", "seq": 1, "kind": "tool_result", "tool": "lookup_process_reputation", "source": "Splunk threat_intel index", "label": "Checking lsass.exe against local threat intel", "detail": "flagged malicious (credential-access)", "status": "ok" }
+  },
+  {
+    "type": "agent_activity",
+    "payload": { "incident_id": "inc-0", "agent": "intel", "seq": 0, "kind": "tool_call", "tool": "lookup_technique_intel", "source": "MITRE ATT&CK", "label": "Looking up ATT&CK intel for T1003.001" }
+  },
+  {
+    "type": "agent_activity",
+    "payload": { "incident_id": "inc-0", "agent": "intel", "seq": 1, "kind": "tool_result", "tool": "lookup_technique_intel", "source": "MITRE ATT&CK", "label": "Looking up ATT&CK intel for T1003.001", "detail": "LSASS Memory; 2 associated group(s)", "status": "ok" }
+  },
+  {
+    "type": "agent_activity",
+    "payload": { "incident_id": "inc-0", "agent": "narrator", "seq": 2, "kind": "tool_call", "tool": "get_account_logon_history", "source": "Splunk winsec index", "label": "Pulling 24h logon history for NORTHPOLE\\Administrator" }
+  },
+  {
+    "type": "agent_activity",
+    "payload": { "incident_id": "inc-0", "agent": "narrator", "seq": 3, "kind": "tool_result", "tool": "get_account_logon_history", "source": "Splunk winsec index", "label": "Pulling 24h logon history for NORTHPOLE\\Administrator", "detail": "18 logon events, 4 failures", "status": "ok" }
+  },
+  {
+    "type": "agent_activity",
+    "payload": { "incident_id": "inc-0", "agent": "intel", "seq": 2, "kind": "tool_call", "tool": "lookup_kev", "source": "CISA KEV", "label": "Searching CISA KEV for \"netlogon\"" }
+  },
+  {
+    "type": "agent_activity",
+    "payload": { "incident_id": "inc-0", "agent": "intel", "seq": 3, "kind": "tool_result", "tool": "lookup_kev", "source": "CISA KEV", "label": "Searching CISA KEV for \"netlogon\"", "detail": "1 match(es), e.g. CVE-2020-1472", "status": "ok" }
+  },
+  {
+    "type": "agent_activity",
+    "payload": { "incident_id": "inc-0", "agent": "narrator", "seq": 4, "kind": "done", "label": "Narrative summary ready" }
+  },
+  {
+    "type": "agent_activity",
+    "payload": { "incident_id": "inc-0", "agent": "intel", "seq": 4, "kind": "done", "source": "MITRE ATT&CK", "label": "Threat-intel correlation ready" }
+  },
+  {
     "type": "narration",
     "payload": {
       "incident_id": "inc-0",
@@ -214,6 +254,30 @@
       ],
       "tactics": ["Execution", "Defense Evasion"]
     }
+  },
+  {
+    "type": "agent_activity",
+    "payload": { "incident_id": "inc-1", "agent": "narrator", "seq": 0, "kind": "tool_call", "tool": "fetch_raw_events", "source": "Splunk", "label": "Fetching raw events for EventCode 1" }
+  },
+  {
+    "type": "agent_activity",
+    "payload": { "incident_id": "inc-1", "agent": "narrator", "seq": 1, "kind": "tool_result", "tool": "fetch_raw_events", "source": "Splunk", "label": "Fetching raw events for EventCode 1", "detail": "2 raw event(s)", "status": "ok" }
+  },
+  {
+    "type": "agent_activity",
+    "payload": { "incident_id": "inc-1", "agent": "intel", "seq": 0, "kind": "tool_call", "tool": "lookup_technique_intel", "source": "MITRE ATT&CK", "label": "Looking up ATT&CK intel for T1218.011" }
+  },
+  {
+    "type": "agent_activity",
+    "payload": { "incident_id": "inc-1", "agent": "intel", "seq": 1, "kind": "tool_result", "tool": "lookup_technique_intel", "source": "MITRE ATT&CK", "label": "Looking up ATT&CK intel for T1218.011", "detail": "Rundll32; 1 associated group(s)", "status": "ok" }
+  },
+  {
+    "type": "agent_activity",
+    "payload": { "incident_id": "inc-1", "agent": "narrator", "seq": 2, "kind": "done", "label": "Narrative summary ready" }
+  },
+  {
+    "type": "agent_activity",
+    "payload": { "incident_id": "inc-1", "agent": "intel", "seq": 2, "kind": "done", "source": "MITRE ATT&CK", "label": "Threat-intel correlation ready" }
   },
   {
     "type": "narration",

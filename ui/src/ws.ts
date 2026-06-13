@@ -93,6 +93,24 @@ export interface LogEventPayload {
   raw: Record<string, unknown>
 }
 
+// One observational step in an AI agent's tool-use loop, streamed as it happens
+// so the UI can show the narrator and threat-intel agent gathering and
+// cross-referencing evidence live. Purely informational: it never alters engine
+// output. `source` names the real data source consulted, kept honest (local
+// Splunk vs. external catalog).
+export interface AgentActivityPayload {
+  incident_id?: string
+  agent: 'narrator' | 'intel'
+  seq: number
+  kind: 'thinking' | 'tool_call' | 'tool_result' | 'done' | 'error'
+  tool?: string
+  source?: string
+  label: string
+  detail?: string
+  status?: 'ok' | 'empty' | 'error'
+  ts?: number
+}
+
 export interface MessageHandlers {
   onGraphUpdate(payload: GraphUpdatePayload): void
   onScoreUpdate(payload: ScoreUpdatePayload): void
@@ -100,6 +118,7 @@ export interface MessageHandlers {
   onNarration(payload: NarrationPayload): void
   onLogEvent?(payload: LogEventPayload): void
   onThreatIntel?(payload: ThreatIntelPayload): void
+  onAgentActivity?(payload: AgentActivityPayload): void
   onOpen?(): void
   onClose?(): void
 }
@@ -196,6 +215,9 @@ export class EngineSocket {
         break
       case 'threat_intel':
         this.handlers.onThreatIntel?.(payload as ThreatIntelPayload)
+        break
+      case 'agent_activity':
+        this.handlers.onAgentActivity?.(payload as AgentActivityPayload)
         break
       default:
         console.warn('[EngineSocket] unknown message type:', type)

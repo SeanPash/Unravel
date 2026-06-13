@@ -222,22 +222,19 @@ func buildNarrator(cfg config, logger *slog.Logger) ai.Narrator {
 
 // buildIntelAgent mirrors buildNarrator: ai-off or a missing API key yields the
 // deterministic snapshot-only agent (no LLM, no network), so both new tabs work
-// with zero keys. With a key, the Claude agent uses live REST sources in live
-// mode and mock fixtures otherwise.
+// with zero keys. With a key, the Claude agent uses the live KEV/NVD source in
+// BOTH live and replay mode: the CISA KEV catalog is a keyless public fetch and
+// NVD is Splunk-independent, so the replay demo can truthfully show the agent
+// reaching out to an external threat database and cross-referencing the chain.
+// The source fails gracefully (tool results carry an error), so an offline
+// demo still completes - the activity feed just reports the source unavailable.
 func buildIntelAgent(cfg config, logger *slog.Logger) ai.ThreatIntelAgent {
 	if cfg.mode == "ai-off" || cfg.apiKey == "" {
 		logger.Info("threat-intel agent using deterministic ATT&CK snapshot")
 		return ai.NewDeterministicIntel()
 	}
-	var source ai.ThreatIntelSource
-	switch cfg.mode {
-	case "live":
-		source = intel.NewRESTSource(intel.RESTConfig{NVDKey: cfg.nvdKey, Insecure: cfg.insecure})
-		logger.Info("threat-intel agent enrichment using live KEV/NVD")
-	default:
-		source = intel.NewMockSource(cfg.testdataDir)
-		logger.Info("threat-intel agent enrichment using mock fixtures", "testdata_dir", cfg.testdataDir)
-	}
+	source := intel.NewRESTSource(intel.RESTConfig{NVDKey: cfg.nvdKey, Insecure: cfg.insecure})
+	logger.Info("threat-intel agent enrichment using live KEV/NVD", "mode", cfg.mode)
 	return ai.NewClaudeIntel(ai.ClaudeIntelConfig{APIKey: cfg.apiKey, Source: source})
 }
 

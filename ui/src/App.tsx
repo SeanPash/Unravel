@@ -1,6 +1,6 @@
 ﻿import { useCallback, useEffect, useMemo, useReducer, useRef } from 'react'
 import { EngineSocket } from './ws'
-import type { GraphUpdatePayload, ScoreUpdatePayload, ChainResultPayload, NarrationPayload, WsNode, WsEdge, LogEventPayload, ThreatIntelPayload } from './ws'
+import type { GraphUpdatePayload, ScoreUpdatePayload, ChainResultPayload, NarrationPayload, WsNode, WsEdge, LogEventPayload, ThreatIntelPayload, AgentActivityPayload } from './ws'
 import { GraphView } from './GraphView'
 import { PhasePanel } from './PhasePanel'
 import { buildAttackPhases, buildTechniqueFoci } from './attackPhases'
@@ -28,6 +28,9 @@ export interface IncidentState {
   firstSeen: number
   awaitingNarration: boolean
   awaitingIntel: boolean
+  // Live feed of the AI agents' tool-use steps for this incident's current
+  // extraction. Reset on each fresh chain_result (a new run starts a new feed).
+  activity: AgentActivityPayload[]
 }
 
 export interface AppState {
@@ -63,6 +66,7 @@ export type Action =
   | { type: 'focus_event'; payload: string | null }
   | { type: 'jump_to_ts'; payload: number }
   | { type: 'threat_intel'; payload: ThreatIntelPayload }
+  | { type: 'agent_activity'; payload: AgentActivityPayload }
   | { type: 'set_tab'; payload: DetailTab }
   | { type: 'select_incident'; payload: string }
   // showEvidence opens the Logs tab with the selection; clicks originating
@@ -105,6 +109,7 @@ function incidentOrPlaceholder(state: AppState, id: string): IncidentState {
     firstSeen: 0,
     awaitingNarration: true,
     awaitingIntel: true,
+    activity: [],
   }
 }
 
@@ -140,11 +145,18 @@ export function reducer(state: AppState, action: Action): AppState {
         firstSeen: prev?.firstSeen ?? chainFirstSeen(action.payload),
         awaitingNarration: true,
         awaitingIntel: true,
+        // A fresh extraction re-runs the agents, so start a new activity feed.
+        activity: [],
       }
+      const isNewIncident = !prev
       return {
         ...state,
         incidents: { ...state.incidents, [id]: incident },
-        activeIncidentId: prev ? state.activeIncidentId : id,
+        activeIncidentId: isNewIncident ? id : state.activeIncidentId,
+        // Surface the live agent feed when a new incident first lands, so the
+        // analyst watches the investigation happen. Re-extractions of an
+        // incident the analyst is already reading leave their tab alone.
+        activeTab: isNewIncident ? 'trace' : state.activeTab,
       }
     }
     case 'narration': {
@@ -166,6 +178,17 @@ export function reducer(state: AppState, action: Action): AppState {
         incidents: {
           ...state.incidents,
           [id]: { ...base, threatIntel: action.payload, awaitingIntel: false },
+        },
+      }
+    }
+    case 'agent_activity': {
+      const id = incidentIdOf(action.payload)
+      const base = incidentOrPlaceholder(state, id)
+      return {
+        ...state,
+        incidents: {
+          ...state.incidents,
+          [id]: { ...base, activity: [...base.activity, action.payload] },
         },
       }
     }
@@ -242,6 +265,7 @@ export default function App() {
       onNarration: (p) => dispatch({ type: 'narration', payload: p }),
       onLogEvent: (p) => dispatch({ type: 'log_event', payload: p }),
       onThreatIntel: (p) => dispatch({ type: 'threat_intel', payload: p }),
+      onAgentActivity: (p) => dispatch({ type: 'agent_activity', payload: p }),
       onOpen: () => dispatch({ type: 'connected' }),
       onClose: () => dispatch({ type: 'disconnected' }),
     })
@@ -440,6 +464,8 @@ export default function App() {
           edges={edges}
           intel={active?.threatIntel ?? null}
           awaitingIntel={active?.awaitingIntel ?? false}
+          activity={active?.activity ?? []}
+          agentsBusy={(active?.awaitingNarration ?? false) || (active?.awaitingIntel ?? false)}
           onNodeFocus={(id) => dispatch({ type: 'focus_node', payload: id })}
           onTechniqueSelect={handleTechniqueSelect}
           activeTechniqueId={activeTechnique?.techniqueId ?? null}

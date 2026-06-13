@@ -257,10 +257,33 @@ func (p *Pipeline) handleSignal(ctx context.Context, sig scorer.Signal) {
 	wg.Wait()
 }
 
+// activityEmitter returns an ai.ActivityFunc that stamps each step with the
+// incident, agent, a monotonic sequence number, and a wall-clock timestamp,
+// then broadcasts it as an agent_activity message. A fresh emitter (with its
+// own seq counter) is created per agent call, so concurrent incidents never
+// share state. The returned func is driven by a single agent goroutine, so the
+// plain int counter needs no synchronization.
+func (p *Pipeline) activityEmitter(incidentID, agent string) ai.ActivityFunc {
+	seq := 0
+	return func(a types.AgentActivityPayload) {
+		a.IncidentID = incidentID
+		a.Agent = agent
+		a.Seq = seq
+		a.TS = time.Now().Unix()
+		seq++
+		msg, err := types.NewMessage(types.MsgTypeAgentActivity, a)
+		if err != nil {
+			p.cfg.Logger.Warn("encode agent_activity", "err", err)
+			return
+		}
+		p.cfg.Broadcaster.Send(msg)
+	}
+}
+
 func (p *Pipeline) runNarration(ctx context.Context, result types.ChainResultPayload) {
 	nctx, cancel := context.WithTimeout(ctx, p.cfg.NarrationTimeout)
 	defer cancel()
-	narr, err := p.cfg.Narrator.Narrate(nctx, result)
+	narr, err := p.cfg.Narrator.Narrate(nctx, result, p.activityEmitter(result.IncidentID, "narrator"))
 	if err != nil {
 		p.cfg.Logger.Warn("narrate", "err", err)
 		return
@@ -274,7 +297,7 @@ func (p *Pipeline) runNarration(ctx context.Context, result types.ChainResultPay
 func (p *Pipeline) runIntel(ctx context.Context, result types.ChainResultPayload) {
 	ictx, cancel := context.WithTimeout(ctx, p.cfg.IntelTimeout)
 	defer cancel()
-	payload, err := p.cfg.IntelAgent.Enrich(ictx, result)
+	payload, err := p.cfg.IntelAgent.Enrich(ictx, result, p.activityEmitter(result.IncidentID, "intel"))
 	if err != nil {
 		p.cfg.Logger.Warn("threat intel", "err", err)
 		payload = types.ThreatIntelPayload{

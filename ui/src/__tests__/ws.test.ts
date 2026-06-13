@@ -8,6 +8,7 @@ import {
   type NarrationPayload,
   type LogEventPayload,
   type ThreatIntelPayload,
+  type AgentActivityPayload,
 } from '../ws'
 
 // Fake WebSocket - no DOM, no real network.
@@ -56,6 +57,7 @@ function makeHandlers(): MessageHandlers & {
   narrations: NarrationPayload[]
   logEvents: LogEventPayload[]
   threatIntels: ThreatIntelPayload[]
+  agentActivities: AgentActivityPayload[]
 } {
   const graphUpdates: GraphUpdatePayload[] = []
   const scoreUpdates: ScoreUpdatePayload[] = []
@@ -63,6 +65,7 @@ function makeHandlers(): MessageHandlers & {
   const narrations: NarrationPayload[] = []
   const logEvents: LogEventPayload[] = []
   const threatIntels: ThreatIntelPayload[] = []
+  const agentActivities: AgentActivityPayload[] = []
   return {
     graphUpdates,
     scoreUpdates,
@@ -70,12 +73,14 @@ function makeHandlers(): MessageHandlers & {
     narrations,
     logEvents,
     threatIntels,
+    agentActivities,
     onGraphUpdate(p) { graphUpdates.push(p) },
     onScoreUpdate(p) { scoreUpdates.push(p) },
     onChainResult(p) { chainResults.push(p) },
     onNarration(p) { narrations.push(p) },
     onLogEvent(p) { logEvents.push(p) },
     onThreatIntel(p) { threatIntels.push(p) },
+    onAgentActivity(p) { agentActivities.push(p) },
   }
 }
 
@@ -229,6 +234,27 @@ describe('EngineSocket message dispatch', () => {
     })
     expect(handlers.threatIntels.length).toBe(1)
     expect(handlers.threatIntels[0].summary).toBe('s')
+  })
+
+  it('calls onAgentActivity with the correct payload', () => {
+    const [factory, getInstances] = fakeFactory()
+    const handlers = makeHandlers()
+    const sock = new EngineSocket('ws://localhost:8080/ws', handlers, factory)
+    sock.connect()
+    const payload: AgentActivityPayload = {
+      incident_id: 'inc-0',
+      agent: 'narrator',
+      seq: 0,
+      kind: 'tool_call',
+      tool: 'lookup_process_reputation',
+      source: 'Splunk threat_intel index',
+      label: 'Checking lsass.exe against local threat intel',
+    }
+    getInstances()[0].send({ type: 'agent_activity', payload })
+    expect(handlers.agentActivities).toHaveLength(1)
+    expect(handlers.agentActivities[0]).toEqual(payload)
+
+    sock.close()
   })
 })
 

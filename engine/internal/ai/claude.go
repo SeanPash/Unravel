@@ -60,8 +60,9 @@ func NewClaude(cfg ClaudeConfig) *ClaudeNarrator {
 }
 
 // Narrate sends the chain to Claude, dispatching tool calls until Claude
-// produces a final end_turn response or maxRounds is exhausted.
-func (c *ClaudeNarrator) Narrate(ctx context.Context, chain types.ChainResultPayload) (types.NarrationPayload, error) {
+// produces a final end_turn response or maxRounds is exhausted. emit streams
+// each tool call and result as it happens (nil disables streaming).
+func (c *ClaudeNarrator) Narrate(ctx context.Context, chain types.ChainResultPayload, emit ActivityFunc) (types.NarrationPayload, error) {
 	chainJSON, err := json.Marshal(chain)
 	if err != nil {
 		return types.NarrationPayload{}, fmt.Errorf("marshal chain: %w", err)
@@ -102,7 +103,12 @@ func (c *ClaudeNarrator) Narrate(ctx context.Context, chain types.ChainResultPay
 			if text == "" {
 				return types.NarrationPayload{}, fmt.Errorf("claude returned no text content")
 			}
-			return parseNarration(text)
+			narr, perr := parseNarration(text)
+			if perr != nil {
+				return types.NarrationPayload{}, perr
+			}
+			emit.emit(types.AgentActivityPayload{Kind: "done", Label: "Narrative summary ready"})
+			return narr, nil
 		}
 
 		messages = append(messages, claudeMessage{Role: "assistant", Content: resp.Content})
@@ -111,10 +117,15 @@ func (c *ClaudeNarrator) Narrate(ctx context.Context, chain types.ChainResultPay
 			if b.Type != "tool_use" {
 				continue
 			}
+			label, source := toolCallActivity(b.Name, b.Input)
+			emit.emit(types.AgentActivityPayload{Kind: "tool_call", Tool: b.Name, Source: source, Label: label})
+			content := c.dispatchTool(ctx, b.Name, b.Input)
+			detail, status := toolResultActivity(b.Name, content)
+			emit.emit(types.AgentActivityPayload{Kind: "tool_result", Tool: b.Name, Source: source, Label: label, Detail: detail, Status: status})
 			results = append(results, claudeContentBlock{
 				Type:      "tool_result",
 				ToolUseID: b.ID,
-				Content:   c.dispatchTool(ctx, b.Name, b.Input),
+				Content:   content,
 			})
 		}
 		messages = append(messages, claudeMessage{Role: "user", Content: results})

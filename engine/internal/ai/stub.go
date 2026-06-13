@@ -19,8 +19,11 @@ func NewStub() *StubNarrator { return &StubNarrator{} }
 
 // Narrate ignores the context (the stub never blocks) and renders a
 // human-readable summary from the chain steps. The hypothesis and action lists
-// are intentionally generic so callers can spot the stub output in the UI.
-func (s *StubNarrator) Narrate(_ context.Context, chain types.ChainResultPayload) (types.NarrationPayload, error) {
+// are intentionally generic so callers can spot the stub output in the UI. The
+// stub issues no tool calls, so it emits only a single terminal "done" step
+// (when emit is non-nil) to keep the activity feed coherent in ai-off mode.
+func (s *StubNarrator) Narrate(_ context.Context, chain types.ChainResultPayload, emit ActivityFunc) (types.NarrationPayload, error) {
+	emit.emit(types.AgentActivityPayload{Kind: "done", Label: "Stub narration (no live enrichment)"})
 	if len(chain.Steps) == 0 {
 		return types.NarrationPayload{
 			Text:    "No chain available to narrate.",
