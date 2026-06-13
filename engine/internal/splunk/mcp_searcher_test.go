@@ -1,6 +1,8 @@
 package splunk
 
 import (
+	"context"
+	"sync"
 	"testing"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -47,5 +49,83 @@ func TestParseMCPRowsGarbageIsError(t *testing.T) {
 	t.Parallel()
 	if _, err := parseMCPRows(resultWithText("not json at all")); err == nil {
 		t.Fatal("want error on non-JSON content, got nil")
+	}
+}
+
+// runQueryArgs is the typed argument the fake MCP server's splunk_run_query
+// tool receives. It mirrors the {"query": <spl>} arguments MCPSearcher sends.
+type runQueryArgs struct {
+	Query string `json:"query"`
+}
+
+func TestMCPSearcherSearchRoundTrip(t *testing.T) {
+	t.Parallel()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	var gotQuery string
+	var mu sync.Mutex
+	server := mcp.NewServer(&mcp.Implementation{Name: "fake-splunk", Version: "1.0"}, nil)
+	mcp.AddTool(server, &mcp.Tool{Name: "splunk_run_query", Description: "run SPL"},
+		func(_ context.Context, _ *mcp.CallToolRequest, args runQueryArgs) (*mcp.CallToolResult, any, error) {
+			mu.Lock()
+			gotQuery = args.Query
+			mu.Unlock()
+			rows := `{"results":[{"process_name":"lsass.exe","reputation":"malicious"}]}`
+			return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: rows}}}, nil, nil
+		})
+
+	clientT, serverT := mcp.NewInMemoryTransports()
+	go func() { _ = server.Run(ctx, serverT) }()
+
+	s := newMCPSearcher(clientT)
+	rows, err := s.Search(ctx, `search index=threat_intel process_name="lsass.exe"`)
+	if err != nil {
+		t.Fatalf("search: %v", err)
+	}
+	if len(rows) != 1 || rows[0]["reputation"] != "malicious" {
+		t.Fatalf("rows = %v", rows)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if gotQuery != `search index=threat_intel process_name="lsass.exe"` {
+		t.Errorf("server saw query %q", gotQuery)
+	}
+}
+
+func TestMCPSearcherDropSessionIsIdentityGuarded(t *testing.T) {
+	t.Parallel()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	server := mcp.NewServer(&mcp.Implementation{Name: "fake-splunk", Version: "1.0"}, nil)
+	mcp.AddTool(server, &mcp.Tool{Name: "splunk_run_query", Description: "run SPL"},
+		func(_ context.Context, _ *mcp.CallToolRequest, _ runQueryArgs) (*mcp.CallToolResult, any, error) {
+			return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: "[]"}}}, nil, nil
+		})
+	clientT, serverT := mcp.NewInMemoryTransports()
+	go func() { _ = server.Run(ctx, serverT) }()
+
+	s := newMCPSearcher(clientT)
+	if _, err := s.Search(ctx, "search index=x"); err != nil {
+		t.Fatalf("search: %v", err)
+	}
+
+	// A foreign (nil) session must not clear the cached one.
+	s.dropSession(nil)
+	s.mu.Lock()
+	live := s.session
+	s.mu.Unlock()
+	if live == nil {
+		t.Fatal("dropSession(nil) wrongly cleared the cached session")
+	}
+
+	// Dropping the real session clears it so a later Search would reconnect.
+	s.dropSession(live)
+	s.mu.Lock()
+	cleared := s.session == nil
+	s.mu.Unlock()
+	if !cleared {
+		t.Error("dropSession(live) did not clear the cached session")
 	}
 }
