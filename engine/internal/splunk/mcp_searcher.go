@@ -16,6 +16,17 @@ import (
 // runQueryTool is the Splunk MCP Server tool that executes SPL and returns rows.
 const runQueryTool = "splunk_run_query"
 
+// generateSPLTool is the Splunk MCP Server's AI Assistant tool that turns a
+// natural-language question into SPL.
+const generateSPLTool = "saia_generate_spl"
+
+// saiaTextField is the input key saia_generate_spl reads the natural-language
+// question from. Confirm against the live server's tools/list before the
+// recorded demo; if it differs (e.g. "question"/"nl"/"query"), change here. We
+// send the question under ONE key on purpose: MCP tools with strict input
+// schemas reject unexpected properties.
+const saiaTextField = "text"
+
 // MCPSearcher implements ai.SplunkSearcher by calling the official Splunk MCP
 // Server's splunk_run_query tool over the MCP streamable-HTTP transport. It is
 // the live searcher when --splunk-mcp-url is set; both the curated narrator
@@ -176,6 +187,32 @@ func (m *MCPSearcher) Search(ctx context.Context, query string) ([]map[string]an
 		return nil, fmt.Errorf("mcp tool %s error: %s", runQueryTool, strings.TrimSpace(mcpText(res)))
 	}
 	return parseMCPRows(res)
+}
+
+// GenerateSPL asks the Splunk MCP Server's AI Assistant (saia_generate_spl) to
+// turn a natural-language question into SPL, returning the SPL string. It reuses
+// the same lazy session, dropSession-on-transport-failure, and IsError handling
+// as Search: a dead connection reconnects on the next call and a tool-level
+// error (e.g. an unlicensed AI Assistant) surfaces gracefully. MCPSearcher is
+// the only ai.SPLGenerator, so this method gates the narrator's splunk_nl_search
+// tool.
+func (m *MCPSearcher) GenerateSPL(ctx context.Context, question string) (string, error) {
+	sess, err := m.ensureSession(ctx)
+	if err != nil {
+		return "", err
+	}
+	res, err := sess.CallTool(ctx, &mcp.CallToolParams{
+		Name:      generateSPLTool,
+		Arguments: map[string]any{saiaTextField: question},
+	})
+	if err != nil {
+		m.dropSession(sess)
+		return "", fmt.Errorf("mcp call %s: %w", generateSPLTool, err)
+	}
+	if res.IsError {
+		return "", fmt.Errorf("mcp tool %s error: %s", generateSPLTool, strings.TrimSpace(mcpText(res)))
+	}
+	return extractGeneratedSPL(mcpText(res))
 }
 
 // dropSession discards sess if it is still the cached session, so a later Search

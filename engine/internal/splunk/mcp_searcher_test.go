@@ -183,3 +183,62 @@ func TestMCPSearcherDropSessionIsIdentityGuarded(t *testing.T) {
 		t.Error("dropSession(live) did not clear the cached session")
 	}
 }
+
+// generateSPLArgs mirrors the {"text": <question>} arguments GenerateSPL sends
+// to the fake saia_generate_spl tool.
+type generateSPLArgs struct {
+	Text string `json:"text"`
+}
+
+func TestMCPSearcherGenerateSPL(t *testing.T) {
+	t.Parallel()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	var gotText string
+	var mu sync.Mutex
+	server := mcp.NewServer(&mcp.Implementation{Name: "fake-splunk", Version: "1.0"}, nil)
+	mcp.AddTool(server, &mcp.Tool{Name: "saia_generate_spl", Description: "nl to spl"},
+		func(_ context.Context, _ *mcp.CallToolRequest, args generateSPLArgs) (*mcp.CallToolResult, any, error) {
+			mu.Lock()
+			gotText = args.Text
+			mu.Unlock()
+			spl := `{"spl":"search index=sysmon EventCode=1 | head 5"}`
+			return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: spl}}}, nil, nil
+		})
+	clientT, serverT := mcp.NewInMemoryTransports()
+	go func() { _ = server.Run(ctx, serverT) }()
+
+	s := newMCPSearcher(clientT)
+	spl, err := s.GenerateSPL(ctx, "show me recent process creations")
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	if spl != "search index=sysmon EventCode=1 | head 5" {
+		t.Fatalf("spl = %q", spl)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if gotText != "show me recent process creations" {
+		t.Errorf("server saw text %q, want the question", gotText)
+	}
+}
+
+func TestMCPSearcherGenerateSPLToolError(t *testing.T) {
+	t.Parallel()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	server := mcp.NewServer(&mcp.Implementation{Name: "fake-splunk", Version: "1.0"}, nil)
+	mcp.AddTool(server, &mcp.Tool{Name: "saia_generate_spl", Description: "nl to spl"},
+		func(_ context.Context, _ *mcp.CallToolRequest, _ generateSPLArgs) (*mcp.CallToolResult, any, error) {
+			return &mcp.CallToolResult{IsError: true, Content: []mcp.Content{&mcp.TextContent{Text: "ai assistant not licensed"}}}, nil, nil
+		})
+	clientT, serverT := mcp.NewInMemoryTransports()
+	go func() { _ = server.Run(ctx, serverT) }()
+
+	s := newMCPSearcher(clientT)
+	if _, err := s.GenerateSPL(ctx, "anything"); err == nil {
+		t.Fatal("want error when saia_generate_spl result IsError is set, got nil")
+	}
+}
