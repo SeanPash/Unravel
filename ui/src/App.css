@@ -1055,16 +1055,21 @@
    read as one family. */
 .node-inspector {
   position: absolute;
-  width: 270px;
+  width: 290px;
   max-height: calc(100% - 70px);
-  overflow-y: auto;
-  background: linear-gradient(170deg, rgba(26, 33, 40, 0.92), rgba(13, 17, 21, 0.92));
-  border: 1px solid rgba(79, 167, 217, 0.14);
-  border-radius: calc(var(--radius) + 3px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: linear-gradient(170deg, rgba(26, 33, 40, 0.95), rgba(12, 15, 19, 0.95));
+  border: 1px solid rgba(125, 145, 165, 0.28);
+  border-radius: 6px;
+  /* A dark outer ring plus a tall drop shadow so the panel reads as a
+     floating overlay, distinct from the dashboard panels behind it. */
   box-shadow:
-    0 4px 18px rgba(0, 0, 0, 0.45),
-    inset 0 1px 0 rgba(221, 227, 233, 0.04);
-  backdrop-filter: blur(5px);
+    0 0 0 1px rgba(6, 8, 11, 0.9),
+    0 10px 30px rgba(0, 0, 0, 0.6),
+    inset 0 1px 0 rgba(221, 227, 233, 0.05);
+  backdrop-filter: blur(6px);
 }
 
 /* The focused panel is the one whose node owns the red ring in the graph
@@ -1073,15 +1078,41 @@
 .node-inspector-focused {
   border-color: rgba(220, 78, 65, 0.55);
   box-shadow:
-    0 4px 18px rgba(0, 0, 0, 0.45),
+    0 8px 26px rgba(0, 0, 0, 0.55),
     0 0 0 1px rgba(220, 78, 65, 0.35),
-    0 0 18px rgba(220, 78, 65, 0.22),
-    inset 0 1px 0 rgba(221, 227, 233, 0.04);
+    0 0 20px rgba(220, 78, 65, 0.22),
+    inset 0 1px 0 rgba(221, 227, 233, 0.05);
 }
 
 .node-inspector-focused .inspector-head {
-  background: linear-gradient(90deg, rgba(220, 78, 65, 0.14), transparent 65%);
+  background: linear-gradient(90deg, rgba(220, 78, 65, 0.16), rgba(18, 23, 28, 0.6) 70%);
   box-shadow: inset 3px 0 0 var(--accent-red);
+}
+
+/* Header doubles as the drag grip; pin it so the grip stays reachable while
+   the body below scrolls. A left bar in the node's kind color identifies the
+   panel as the same node it came from. */
+.inspector-head {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  background: linear-gradient(90deg,
+    color-mix(in srgb, var(--kind-accent) 12%, rgba(18, 23, 28, 0.85)),
+    rgba(18, 23, 28, 0.6) 70%);
+  box-shadow: inset 3px 0 0 var(--kind-accent);
+  cursor: grab;
+  user-select: none;
+  touch-action: none;
+}
+
+.inspector-head:active {
+  cursor: grabbing;
 }
 
 .inspector-head-right {
@@ -1102,22 +1133,6 @@
   color: var(--accent-red);
   border: 1px solid rgba(220, 78, 65, 0.5);
   background: rgba(220, 78, 65, 0.12);
-}
-
-.inspector-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-2);
-  padding: 10px 12px;
-  border-bottom: 1px solid var(--border-subtle);
-  cursor: grab;
-  user-select: none;
-  touch-action: none;
-}
-
-.inspector-head:active {
-  cursor: grabbing;
 }
 
 .inspector-title {
@@ -1156,55 +1171,143 @@
 
 .inspector-close {
   display: inline-flex;
-  border: none;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border: 1px solid transparent;
+  border-radius: 3px;
   background: transparent;
   color: var(--text-faint);
   cursor: pointer;
-  padding: 2px;
+  padding: 0;
+  transition: color 0.12s, background 0.12s, border-color 0.12s;
 }
 
 .inspector-close:hover {
   color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.05);
+  border-color: var(--border);
 }
 
+/* Scroll container under the pinned header. */
+.inspector-body {
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Each section is its own block. A gap plus a divider plus the tinted header
+   strip make the boundary between sections obvious at a glance. */
 .inspector-section {
-  padding: 10px 12px;
-  border-bottom: 1px solid var(--border-subtle);
+  padding: 10px 12px 12px;
+  border-top: 1px solid var(--border-subtle);
 }
 
-.inspector-section h3 {
-  margin: 0 0 6px;
+.inspector-body > .inspector-section:first-child {
+  border-top: none;
+}
+
+/* Data-heavy blocks recess into the panel so they read as reference material
+   distinct from the narrative role/connection blocks above them. */
+.inspector-section-inset {
+  background: rgba(0, 0, 0, 0.22);
+  box-shadow: inset 0 1px 0 rgba(0, 0, 0, 0.3);
+}
+
+.inspector-sec-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-bottom: 8px;
+}
+
+.inspector-sec-tick {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  border-radius: 4px;
+  color: var(--sec-accent, var(--text-muted));
+  background: color-mix(in srgb, var(--sec-accent, #8a99a8) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--sec-accent, #8a99a8) 32%, transparent);
+}
+
+.inspector-sec-head h3 {
+  margin: 0;
+  flex: 1;
   font-family: var(--font-display);
   font-size: 9px;
   font-weight: 500;
   letter-spacing: 0.16em;
   text-transform: uppercase;
-  color: var(--text-faint);
+  color: var(--text-muted);
 }
 
-.inspector-section-head {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: var(--space-2);
+.inspector-sec-meta {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.inspector-count {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--border-subtle);
 }
 
 .inspector-conf {
   font-family: var(--font-mono);
   font-size: 11px;
   font-variant-numeric: tabular-nums;
+  font-weight: 500;
 }
+
+.inspector-conf-high { color: var(--accent-green); }
+.inspector-conf-medium { color: var(--accent-amber); }
+.inspector-conf-low { color: var(--accent-red); }
+
+/* Role callout: a tinted card whose left bar carries the confidence band, so
+   the engine's verdict on this node reads instantly. */
+.inspector-role-callout {
+  border-radius: 4px;
+  border: 1px solid var(--border-subtle);
+  border-left: 3px solid var(--callout-accent, var(--accent-green));
+  background: color-mix(in srgb, var(--callout-accent, var(--accent-green)) 7%, rgba(0, 0, 0, 0.18));
+  padding: 8px 10px;
+}
+
+.inspector-role-high { --callout-accent: var(--accent-green); }
+.inspector-role-medium { --callout-accent: var(--accent-amber); }
+.inspector-role-low { --callout-accent: var(--accent-red); }
 
 .inspector-role {
   margin: 0;
-  padding-left: 16px;
+  padding: 0;
+  list-style: none;
   font-size: 12px;
   line-height: 1.5;
   color: var(--text-primary);
 }
 
 .inspector-role li {
-  margin-bottom: 2px;
+  margin-bottom: 6px;
+}
+
+.inspector-role li + li {
+  padding-top: 6px;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.inspector-role li:last-child {
+  margin-bottom: 0;
 }
 
 .inspector-quiet {
@@ -1219,6 +1322,7 @@
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
+  margin-top: 10px;
 }
 
 .inspector-chip {
@@ -1260,21 +1364,23 @@
 .inspector-relation {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 7px;
   width: 100%;
-  padding: 3px 4px;
-  border: none;
-  border-radius: 3px;
-  background: transparent;
+  padding: 5px 7px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.02);
   color: var(--text-faint);
   font: inherit;
   font-size: 11px;
   text-align: left;
   cursor: pointer;
+  transition: background 0.12s, border-color 0.12s;
 }
 
 .inspector-relation:hover {
   background: rgba(255, 255, 255, 0.05);
+  border-color: var(--border-subtle);
 }
 
 .inspector-relation-kind {
@@ -1319,11 +1425,157 @@
   color: var(--text-muted);
 }
 
-.inspector-foot {
-  padding: 8px 12px;
+/* ─── Inspector evidence list ─────────────────────────────────────────── */
+
+/* The actual raw events behind the node, replacing the old dead "N events in
+   the Logs tab" footer. Each row reads in place and can hand off to the Logs
+   tab and the timeline. */
+.inspector-evidence-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.inspector-evidence {
+  border: 1px solid var(--border-subtle);
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.02);
+  overflow: hidden;
+  transition: border-color 0.12s;
+}
+
+.inspector-evidence:hover {
+  border-color: var(--border);
+}
+
+.inspector-evidence-open {
+  border-color: color-mix(in srgb, var(--accent-blue-bright) 45%, var(--border-subtle));
+  background: rgba(79, 167, 217, 0.06);
+}
+
+.inspector-evidence-row {
+  display: flex;
+  align-items: stretch;
+}
+
+.inspector-evidence-main {
+  display: grid;
+  grid-template-columns: auto auto auto 1fr;
+  align-items: center;
+  gap: 7px;
+  flex: 1;
+  min-width: 0;
+  padding: 6px 8px;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+/* Expand affordance: the caret turns down when the raw detail is open. */
+.inspector-evidence-caret {
+  color: var(--text-faint);
+  transition: transform 0.15s ease, color 0.12s;
+}
+
+.inspector-evidence:hover .inspector-evidence-caret {
+  color: var(--text-muted);
+}
+
+.inspector-evidence-open .inspector-evidence-caret {
+  transform: rotate(90deg);
+  color: var(--accent-blue-bright);
+}
+
+.inspector-evidence-ts {
   font-family: var(--font-mono);
   font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+}
+
+.inspector-evidence-src {
+  font-family: var(--font-display);
+  font-size: 8px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  padding: 1px 5px;
+  border-radius: 3px;
+  border: 1px solid var(--border-subtle);
+  background: rgba(0, 0, 0, 0.3);
+  white-space: nowrap;
+}
+
+.inspector-evidence-text {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
   color: var(--text-faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.inspector-evidence:hover .inspector-evidence-text {
+  color: var(--text-muted);
+}
+
+.inspector-evidence-open-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 30px;
+  border: none;
+  border-left: 1px solid var(--border-subtle);
+  background: rgba(79, 167, 217, 0.05);
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: color 0.12s, background 0.12s;
+}
+
+.inspector-evidence-open-btn:hover {
+  color: var(--accent-blue-bright);
+  background: rgba(79, 167, 217, 0.16);
+}
+
+.inspector-evidence-detail {
+  margin: 0;
+  padding: 6px 8px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  border-top: 1px solid var(--border-subtle);
+  background: rgba(0, 0, 0, 0.28);
+}
+
+.inspector-evidence-field {
+  display: grid;
+  grid-template-columns: minmax(0, 84px) 1fr;
+  gap: 8px;
+  font-size: 10.5px;
+  line-height: 1.45;
+}
+
+.inspector-evidence-field dt {
+  font-family: var(--font-mono);
+  color: var(--text-faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.inspector-evidence-field dd {
+  margin: 0;
+  font-family: var(--font-mono);
+  color: var(--text-muted);
+  word-break: break-word;
 }
 
 /* ─── Attack phases panel ─────────────────────────────────────────────── */

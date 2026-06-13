@@ -54,6 +54,17 @@ export function selectRelatedLogs(
   return out
 }
 
+// One line of human-readable context per raw event. Field names differ per
+// source (Sysmon vs Windows Security), so try the common ones in order. Pure
+// and shared by the Logs panel and the node inspector's evidence list.
+export function summarizeLog(log: LogEventPayload): string {
+  const r = log.raw
+  const host = r['host'] ?? r['Computer']
+  const subject = r['Image'] ?? r['TargetUserName'] ?? r['TargetFilename'] ?? r['SourceImage']
+  const cmd = r['CommandLine']
+  return [host, subject, cmd].filter(Boolean).map(String).join('  ')
+}
+
 // nodeForEvent maps a chain step's event_id to the destination node of the edge
 // it produced, so the ATT&CK ribbon can focus the right graph node on click.
 export function nodeForEvent(edges: WsEdge[], eventId: string): string | null {

@@ -4,8 +4,9 @@
 // technique membership from the chain-derived foci, and the why from the
 // chain steps whose evidence touches the node. Pure, React-free, vitest-able.
 
-import type { ChainResultPayload, WsEdge, WsNode } from './ws'
+import type { ChainResultPayload, LogEventPayload, WsEdge, WsNode } from './ws'
 import type { AttackPhase, TechniqueFocus } from './attackPhases'
+import { summarizeLog } from './logFilter'
 
 export interface NodeRelation {
   node: WsNode
@@ -13,6 +14,17 @@ export interface NodeRelation {
   kind: string
   ts: number
   confidence: number
+}
+
+// One raw event backing the node's edges: the actual evidence, surfaced in
+// the inspector instead of only counted. raw is carried so a row can expand
+// in place without a round-trip to the Logs tab.
+export interface EvidenceItem {
+  eventId: string
+  ts: number
+  source: string
+  summary: string
+  raw: Record<string, unknown>
 }
 
 export interface NodeContext {
@@ -27,8 +39,10 @@ export interface NodeContext {
   onAttackPath: boolean
   // Strongest scored edge touching the node.
   maxConfidence: number
-  // Distinct raw events behind the node's edges (what the Logs tab shows
-  // when this node is focused).
+  // The actual raw events behind the node's edges, time-sorted. The Logs tab
+  // shows these when the node is focused; the inspector lists them inline.
+  evidence: EvidenceItem[]
+  // Convenience count, == evidence.length.
   evidenceCount: number
 }
 
@@ -39,6 +53,7 @@ export function buildNodeContext(
   chain: ChainResultPayload | null,
   phases: AttackPhase[],
   techniqueFoci: TechniqueFocus[],
+  logs: Record<string, LogEventPayload> = {},
 ): NodeContext | null {
   const node = nodes[nodeId]
   if (!node) return null
@@ -66,6 +81,20 @@ export function buildNodeContext(
     .sort((a, b) => a.ts - b.ts)
     .map((s) => s.description)
 
+  const evidence: EvidenceItem[] = []
+  for (const id of eventIds) {
+    const log = logs[id]
+    if (!log) continue
+    evidence.push({
+      eventId: id,
+      ts: log.ts,
+      source: log.source,
+      summary: summarizeLog(log),
+      raw: log.raw,
+    })
+  }
+  evidence.sort((a, b) => a.ts - b.ts)
+
   return {
     node,
     parents,
@@ -75,6 +104,9 @@ export function buildNodeContext(
     chainDescriptions,
     onAttackPath: chainDescriptions.length > 0,
     maxConfidence,
-    evidenceCount: eventIds.size,
+    evidence,
+    // The node may touch events the client has not received the log for yet;
+    // count the known evidence so the header matches what is listed.
+    evidenceCount: evidence.length,
   }
 }

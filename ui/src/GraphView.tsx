@@ -36,6 +36,9 @@ export interface GraphViewProps {
   getNodeContext?: (nodeId: string, incidentId?: string) => NodeContext | null
   onPhaseSelect?: (phase: AttackPhase) => void
   onTechniqueSelect?: (techniqueId: string) => void
+  // An inspector evidence row was opened: navigate the rest of the app to
+  // that raw event (e.g. the Logs tab and the timeline moment).
+  onEventOpen?: (eventId: string, ts: number) => void
 }
 
 export interface PhaseFocus {
@@ -518,7 +521,7 @@ interface OpenInspector {
 // rows, and scrolling inside the body stay ordinary clicks.
 function DraggableInspector({
   entry, context, zIndex, focused, container,
-  onMove, onSelect, onClose, onNodeFocus, onPhaseSelect, onTechniqueSelect,
+  onMove, onSelect, onClose, onNodeFocus, onPhaseSelect, onTechniqueSelect, onEventOpen,
 }: {
   entry: OpenInspector
   context: NodeContext
@@ -531,6 +534,7 @@ function DraggableInspector({
   onNodeFocus: (nodeId: string) => void
   onPhaseSelect: (phase: AttackPhase) => void
   onTechniqueSelect: (techniqueId: string) => void
+  onEventOpen: (eventId: string, ts: number) => void
 }) {
   const dragRef = useRef<{ dx: number; dy: number } | null>(null)
   return (
@@ -564,18 +568,19 @@ function DraggableInspector({
       onNodeFocus={onNodeFocus}
       onPhaseSelect={onPhaseSelect}
       onTechniqueSelect={onTechniqueSelect}
+      onEventOpen={onEventOpen}
     />
   )
 }
 
-const INSPECTOR_WIDTH = 270
+const INSPECTOR_WIDTH = 290
 // Cascade offset for each newly opened drawer so they stack readably.
 const INSPECTOR_CASCADE = 26
 
 export function GraphView({
   nodes, edges, chain, timeWindow, focusedNodeId, onNodeFocus,
   incidents, activeIncidentId, onIncidentSelect, phaseFocus,
-  getNodeContext, onPhaseSelect, onTechniqueSelect,
+  getNodeContext, onPhaseSelect, onTechniqueSelect, onEventOpen,
 }: GraphViewProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const cyRef = useRef<Core | null>(null)
@@ -1582,6 +1587,7 @@ export function GraphView({
             onNodeFocus={(id) => onNodeFocus?.(id)}
             onPhaseSelect={(p) => onPhaseSelect?.(p)}
             onTechniqueSelect={(id) => onTechniqueSelect?.(id)}
+            onEventOpen={(eventId, ts) => onEventOpen?.(eventId, ts)}
           />
         )
       })}

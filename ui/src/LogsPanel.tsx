@@ -1,8 +1,13 @@
 import { useState } from 'react'
 import type { LogEventPayload } from './ws'
 import type { RelatedLog } from './logFilter'
+import { summarizeLog } from './logFilter'
 import { phaseColorAt } from './timeline'
 import type { TimelinePhase } from './timeline'
+
+// Kept as a named re-export so existing importers (and tests) keep working;
+// the implementation now lives in logFilter so non-React code can share it.
+export const summarize = summarizeLog
 
 export interface LogsPanelProps {
   logs: RelatedLog[]
@@ -13,16 +18,6 @@ export interface LogsPanelProps {
   phases?: TimelinePhase[]
   // Clicking a row also drives the timeline to the log's moment.
   onLogSelect?: (log: LogEventPayload) => void
-}
-
-// One line of human-readable context per raw event. Field names differ per
-// source (Sysmon vs Windows Security), so try the common ones in order.
-export function summarize(log: LogEventPayload): string {
-  const r = log.raw
-  const host = r['host'] ?? r['Computer']
-  const subject = r['Image'] ?? r['TargetUserName'] ?? r['TargetFilename'] ?? r['SourceImage']
-  const cmd = r['CommandLine']
-  return [host, subject, cmd].filter(Boolean).map(String).join('  ')
 }
 
 function formatTs(ts: number): string {
