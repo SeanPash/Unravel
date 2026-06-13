@@ -489,6 +489,10 @@ func TestIsReadOnlySPL(t *testing.T) {
 		`search index=x |  delete`,
 		`search index=x |` + "\t" + `outputlookup foo`,
 		`search index=x | Delete`,
+		`search index=x | runshellscript payload.sh`,
+		`search index=x | mcollect index=metrics`,
+		`search index=x | tscollect namespace=ns`,
+		`search index=x | script python danger`,
 	}
 	for _, q := range mutating {
 		if isReadOnlySPL(q) {

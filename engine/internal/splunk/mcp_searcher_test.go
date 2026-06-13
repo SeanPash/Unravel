@@ -93,6 +93,25 @@ func TestMCPSearcherSearchRoundTrip(t *testing.T) {
 	}
 }
 
+func TestMCPSearcherSearchToolError(t *testing.T) {
+	t.Parallel()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	server := mcp.NewServer(&mcp.Implementation{Name: "fake-splunk", Version: "1.0"}, nil)
+	mcp.AddTool(server, &mcp.Tool{Name: "splunk_run_query", Description: "run SPL"},
+		func(_ context.Context, _ *mcp.CallToolRequest, _ runQueryArgs) (*mcp.CallToolResult, any, error) {
+			return &mcp.CallToolResult{IsError: true, Content: []mcp.Content{&mcp.TextContent{Text: "malformed SPL"}}}, nil, nil
+		})
+	clientT, serverT := mcp.NewInMemoryTransports()
+	go func() { _ = server.Run(ctx, serverT) }()
+
+	s := newMCPSearcher(clientT)
+	if _, err := s.Search(ctx, "search index=x | bogus"); err == nil {
+		t.Fatal("want error when the tool result IsError is set, got nil")
+	}
+}
+
 func TestMCPSearcherDropSessionIsIdentityGuarded(t *testing.T) {
 	t.Parallel()
 	ctx, cancel := context.WithCancel(context.Background())

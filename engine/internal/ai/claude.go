@@ -342,7 +342,7 @@ var pipeWS = regexp.MustCompile(`\|\s+`)
 // search through splunk_search.
 func isReadOnlySPL(spl string) bool {
 	normalized := pipeWS.ReplaceAllString(strings.ToLower(spl), "|")
-	banned := []string{"|delete", "|outputlookup", "|outputcsv", "|collect", "|sendalert"}
+	banned := []string{"|delete", "|outputlookup", "|outputcsv", "|collect", "|mcollect", "|tscollect", "|sendalert", "|runshellscript", "|script"}
 	for _, b := range banned {
 		if strings.Contains(normalized, b) {
 			return false

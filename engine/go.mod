@@ -2,7 +2,11 @@ module github.com/luigifernandez/unravel/engine
 
 go 1.25.0
 
-require github.com/dgraph-io/badger/v4 v4.9.1
+require (
+	github.com/dgraph-io/badger/v4 v4.9.1
+	github.com/gorilla/websocket v1.5.3
+	github.com/modelcontextprotocol/go-sdk v1.6.1
+)
 
 require (
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
@@ -12,9 +16,7 @@ require (
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/google/flatbuffers v25.2.10+incompatible // indirect
 	github.com/google/jsonschema-go v0.4.3 // indirect
-	github.com/gorilla/websocket v1.5.3 // indirect
 	github.com/klauspost/compress v1.18.0 // indirect
-	github.com/modelcontextprotocol/go-sdk v1.6.1 // indirect
 	github.com/segmentio/asm v1.1.3 // indirect
 	github.com/segmentio/encoding v0.5.4 // indirect
 	github.com/yosida95/uritemplate/v3 v3.0.2 // indirect
