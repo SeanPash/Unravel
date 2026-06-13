@@ -1,8 +1,10 @@
 // Minimap overlay for the incident map: one rounded rect per incident
 // section, dashed links between related incidents, faint dots for activity
 // outside any section, and the live viewport rectangle. Clicking a section
-// selects that incident; clicking open map pans the camera there.
+// selects that incident; clicking open map pans the camera there; holding
+// the mouse button and dragging scrubs the camera live across the map.
 
+import { useEffect, useRef } from 'react'
 import { minimapTransform, toMini, fromMini } from './incidentMap'
 import type { Rect } from './incidentMap'
 
@@ -30,8 +32,8 @@ export interface MinimapProps {
   data: MinimapData
   onSectionClick: (incidentId: string) => void
   onJump: (worldX: number, worldY: number) => void
-  // Scrub navigation: fired for every mouse move over the minimap with the
-  // world point under the cursor, then once when the cursor leaves.
+  // Scrub navigation: fired for every drag move (button held) over the
+  // minimap with the world point under the cursor, then once on release.
   onHover: (worldX: number, worldY: number) => void
   onHoverEnd: () => void
   // The incident section under the cursor while scrubbing (null between
@@ -45,6 +47,27 @@ export function Minimap({ data, onSectionClick, onJump, onHover, onHoverEnd, onH
   const t = minimapTransform(data.world, MINIMAP_W, MINIMAP_H, MINIMAP_PAD)
   const sectionById = new Map(data.sections.map((s) => [s.id, s]))
 
+  // Whether the button is held over the minimap, and whether a drag actually
+  // moved the camera, so the click that ends a drag doesn't also fire the
+  // click-to-jump below.
+  const draggingRef = useRef(false)
+  const movedRef = useRef(false)
+  // A release can land outside the minimap; keep the latest end callback in a
+  // ref so the listener registered once still calls the current one.
+  const onHoverEndRef = useRef(onHoverEnd)
+  onHoverEndRef.current = onHoverEnd
+
+  useEffect(() => {
+    const stop = () => {
+      if (!draggingRef.current) return
+      draggingRef.current = false
+      // Settle the view only when the drag actually scrubbed.
+      if (movedRef.current) onHoverEndRef.current()
+    }
+    window.addEventListener('mouseup', stop)
+    return () => window.removeEventListener('mouseup', stop)
+  }, [])
+
   const rectOf = (bb: Rect) => {
     const a = toMini(t, bb.x1, bb.y1)
     const b = toMini(t, bb.x2, bb.y2)
@@ -56,12 +79,28 @@ export function Minimap({ data, onSectionClick, onJump, onHover, onHoverEnd, onH
     return fromMini(t, e.clientX - svg.left, e.clientY - svg.top)
   }
 
+  function handleMouseDown(e: React.MouseEvent<SVGSVGElement>) {
+    e.preventDefault()
+    draggingRef.current = true
+    movedRef.current = false
+  }
+
+  // A plain click (no drag) jumps the camera; the click that ends a drag is
+  // swallowed so it doesn't fight the snap from the released drag.
   function handleBackgroundClick(e: React.MouseEvent<SVGSVGElement>) {
+    if (movedRef.current) {
+      movedRef.current = false
+      return
+    }
     const p = worldPoint(e)
     onJump(p.x, p.y)
   }
 
+  // Scrub navigation only while the button is held: each drag move pans the
+  // camera to the world point under the cursor and previews its incident.
   function handleMouseMove(e: React.MouseEvent<SVGSVGElement>) {
+    if (!draggingRef.current) return
+    movedRef.current = true
     const p = worldPoint(e)
     onHover(p.x, p.y)
     if (onHoverIncident) {
@@ -100,9 +139,9 @@ export function Minimap({ data, onSectionClick, onJump, onHover, onHoverEnd, onH
         width={MINIMAP_W}
         height={MINIMAP_H}
         viewBox={`0 0 ${MINIMAP_W} ${MINIMAP_H}`}
+        onMouseDown={handleMouseDown}
         onClick={handleBackgroundClick}
         onMouseMove={handleMouseMove}
-        onMouseLeave={onHoverEnd}
       >
         <defs>
           <pattern id="minimap-grid" width="12" height="12" patternUnits="userSpaceOnUse">

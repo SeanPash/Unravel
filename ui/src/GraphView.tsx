@@ -1421,10 +1421,10 @@ export function GraphView({
     })
   }
 
-  // Hover scrubbing: while the cursor moves across the minimap the camera
-  // pans instantly to keep the hovered world point centered, at the current
-  // zoom. Auto-snap is held off until the cursor leaves, then the view
-  // settles exactly like the end of a manual pan.
+  // Drag scrubbing: while the button is held and dragged across the minimap
+  // the camera pans instantly to keep the dragged world point centered, at
+  // the current zoom. Auto-snap is held off until the button is released,
+  // then the view settles exactly like the end of a manual pan.
   function handleMiniHover(x: number, y: number) {
     const cy = cyRef.current
     if (!cy) return
