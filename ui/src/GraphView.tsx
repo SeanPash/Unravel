@@ -160,14 +160,17 @@ export function chainTimestamps(chain: ChainResultPayload | null): Set<number> {
 
 const EDGE_LABEL_FONT_PX = 10
 const EDGE_LABEL_CHAR_W = EDGE_LABEL_FONT_PX * 0.56
-// Keeps labels clear of the node bodies and the arrowhead at both ends.
-const EDGE_LABEL_CLEARANCE = 34
-// The fixed cola edgeLength this graph used before; short labels do not
-// shrink edges below it.
-const EDGE_LENGTH_MIN = 110
-const EDGE_LENGTH_MAX = 230
+// Keeps the verb clear of the node bodies, their name chips, and the
+// arrowhead at both ends. A node name chip hangs well below its node, so the
+// edge needs enough length that its mid-edge verb never lands on a
+// neighbor's name. This clearance is the dominant anti-overlap lever.
+const EDGE_LABEL_CLEARANCE = 70
+// Floor on edge length so even an unlabeled or short-verb edge keeps its
+// endpoints far enough apart that their name chips do not collide.
+const EDGE_LENGTH_MIN = 190
+const EDGE_LENGTH_MAX = 360
 // Extra room so a label still reads when the simulation compresses the edge.
-const EDGE_LENGTH_LABEL_ALLOWANCE = 26
+const EDGE_LENGTH_LABEL_ALLOWANCE = 40
 
 export function desiredEdgeLength(kind: string): number {
   const textWidth = (kind.replace(/_/g, ' ').length + 1) * EDGE_LABEL_CHAR_W
@@ -470,7 +473,7 @@ const COLA_OPTIONS: ColaLayoutOptions = {
   animate: true,
   fit: false,
   centerGraph: false,
-  nodeSpacing: 30,
+  nodeSpacing: 55,
   edgeLength: (edge) =>
     edge.data('crossSection')
       ? CROSS_SECTION_EDGE_LENGTH
