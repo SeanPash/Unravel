@@ -112,4 +112,43 @@ describe('App reducer', () => {
     expect(s.incidents['inc-legacy']).toBeDefined()
     expect(s.activeIncidentId).toBe('inc-legacy')
   })
+
+  it('agent_activity appends to the matching incident activity feed in order', () => {
+    let s = reducer(initialState, {
+      type: 'chain_result',
+      payload: { incident_id: 'inc-0', incident_label: 'WS01', confidence: 0.9, steps: [] },
+    })
+    s = reducer(s, { type: 'agent_activity', payload: { incident_id: 'inc-0', agent: 'narrator', seq: 0, kind: 'tool_call', tool: 'lookup_process_reputation', source: 'Splunk threat_intel index', label: 'Checking lsass.exe' } })
+    s = reducer(s, { type: 'agent_activity', payload: { incident_id: 'inc-0', agent: 'narrator', seq: 1, kind: 'tool_result', tool: 'lookup_process_reputation', source: 'Splunk threat_intel index', label: 'Checking lsass.exe', detail: 'flagged malicious', status: 'ok' } })
+    expect(s.incidents['inc-0'].activity).toHaveLength(2)
+    expect(s.incidents['inc-0'].activity[1].detail).toBe('flagged malicious')
+  })
+
+  it('a new incident opens the Investigation tab to show the agents working', () => {
+    const s = reducer(initialState, {
+      type: 'chain_result',
+      payload: { incident_id: 'inc-0', incident_label: 'WS01', confidence: 0.9, steps: [] },
+    })
+    expect(s.activeTab).toBe('trace')
+  })
+
+  it('a fresh chain_result resets the activity feed (a new run starts a new feed)', () => {
+    let s = reducer(initialState, {
+      type: 'chain_result',
+      payload: { incident_id: 'inc-0', incident_label: 'WS01', confidence: 0.9, steps: [] },
+    })
+    s = reducer(s, { type: 'agent_activity', payload: { incident_id: 'inc-0', agent: 'narrator', seq: 0, kind: 'done', label: 'done' } })
+    expect(s.incidents['inc-0'].activity).toHaveLength(1)
+    s = reducer(s, {
+      type: 'chain_result',
+      payload: { incident_id: 'inc-0', incident_label: 'WS01', confidence: 0.95, steps: [{ event_id: 'e1', description: 'd', confidence: 0.9, ts: 1 }] },
+    })
+    expect(s.incidents['inc-0'].activity).toHaveLength(0)
+  })
+
+  it('agent_activity arriving before its chain creates a placeholder incident', () => {
+    const s = reducer(initialState, { type: 'agent_activity', payload: { incident_id: 'inc-9', agent: 'intel', seq: 0, kind: 'tool_call', tool: 'lookup_kev', source: 'CISA KEV', label: 'Searching CISA KEV' } })
+    expect(s.incidents['inc-9'].activity).toHaveLength(1)
+    expect(s.incidents['inc-9'].chain).toBeNull()
+  })
 })

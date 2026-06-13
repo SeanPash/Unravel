@@ -2003,6 +2003,116 @@ button.intel-technique-head-link:hover .intel-technique-name {
   margin: 24px auto;
 }
 
+.phase-disclaimer {
+  margin: 14px 0 4px;
+  font-size: 10px;
+  font-style: italic;
+  color: var(--text-faint);
+  line-height: 1.5;
+}
+
+/* Investigation trace: live AI agent tool-use feed */
+.trace-panel {
+  padding: 14px;
+  overflow: auto;
+  font-size: 13px;
+}
+
+.trace-disclaimer {
+  margin: 0 0 12px;
+  padding: 6px 10px;
+  font-size: 11px;
+  font-style: italic;
+  color: var(--text-faint);
+  background: rgba(157, 124, 216, 0.06);
+  border-left: 2px solid var(--accent-purple);
+  border-radius: var(--radius);
+}
+
+.trace-empty {
+  padding: 24px;
+  color: var(--text-faint);
+  font-size: 12px;
+  font-style: italic;
+}
+
+.trace-feed {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.trace-step {
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--border);
+  border-radius: var(--radius);
+  padding: 8px 12px;
+  background: var(--bg-elevated);
+}
+
+.trace-step-pending { border-left-color: var(--accent-blue-bright); }
+.trace-step-ok { border-left-color: var(--accent-green); }
+.trace-step-empty { border-left-color: var(--text-faint); }
+.trace-step-error { border-left-color: var(--accent-red); }
+.trace-step-kind-done { border-left-color: var(--accent-purple); }
+
+.trace-step-head {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  flex-wrap: wrap;
+}
+
+.trace-source {
+  font-family: var(--font-display);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--accent-blue-bright);
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  padding: 1px 5px;
+  white-space: nowrap;
+}
+
+.trace-label {
+  color: var(--text-muted);
+  font-size: 12px;
+  flex: 1;
+  min-width: 0;
+}
+
+.trace-detail {
+  margin-top: 5px;
+  padding-left: 2px;
+  font-size: 11px;
+  color: var(--text-faint);
+}
+
+.trace-step-ok .trace-detail { color: var(--accent-green); }
+.trace-step-error .trace-detail { color: #fca5a5; }
+
+.trace-spinner {
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--border);
+  border-top-color: var(--accent-blue-bright);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  flex: none;
+}
+
+.trace-busy {
+  margin-top: 10px;
+  font-size: 11px;
+  font-style: italic;
+  color: var(--text-faint);
+}
+
 /* Incident switcher rail */
 .incident-pane {
   flex: 0 0 200px;

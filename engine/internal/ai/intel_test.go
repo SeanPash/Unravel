@@ -25,7 +25,7 @@ func sampleChain() types.ChainResultPayload {
 
 func TestDeterministicIntelDedupesAndPopulates(t *testing.T) {
 	a := NewDeterministicIntel()
-	got, err := a.Enrich(context.Background(), sampleChain())
+	got, err := a.Enrich(context.Background(), sampleChain(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -76,7 +76,7 @@ func TestClaudeIntelAgentRunsToolThenReturns(t *testing.T) {
 	defer srv.Close()
 
 	a := NewClaudeIntel(ClaudeIntelConfig{APIKey: "k", BaseURL: srv.URL, Source: stubIntelSource{}})
-	got, err := a.Enrich(context.Background(), sampleChain())
+	got, err := a.Enrich(context.Background(), sampleChain(), nil)
 	if err != nil {
 		t.Fatalf("enrich: %v", err)
 	}
@@ -88,5 +88,44 @@ func TestClaudeIntelAgentRunsToolThenReturns(t *testing.T) {
 	}
 	if len(got.CVEMatches) != 1 || !got.CVEMatches[0].InKEV {
 		t.Errorf("cve matches wrong: %+v", got.CVEMatches)
+	}
+}
+
+func TestClaudeIntelAgentEmitsActivity(t *testing.T) {
+	var calls int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls++
+		var resp claudeResponse
+		if calls == 1 {
+			resp = claudeResponse{Content: []claudeContentBlock{
+				{Type: "tool_use", ID: "t1", Name: "lookup_kev", Input: map[string]any{"keyword": "kerberos"}},
+			}}
+		} else {
+			resp = claudeResponse{Content: []claudeContentBlock{
+				{Type: "text", Text: `{"status":"ok","summary":"done","techniques":[],"cve_matches":[]}`},
+			}}
+		}
+		_ = json.NewEncoder(w).Encode(resp)
+	}))
+	defer srv.Close()
+
+	a := NewClaudeIntel(ClaudeIntelConfig{APIKey: "k", BaseURL: srv.URL, Source: stubIntelSource{}})
+	var got []types.AgentActivityPayload
+	emit := func(p types.AgentActivityPayload) { got = append(got, p) }
+	if _, err := a.Enrich(context.Background(), sampleChain(), emit); err != nil {
+		t.Fatalf("enrich: %v", err)
+	}
+
+	if len(got) != 3 {
+		t.Fatalf("activity steps = %d, want 3 (tool_call, tool_result, done): %+v", len(got), got)
+	}
+	if got[0].Kind != "tool_call" || got[0].Source != "CISA KEV" {
+		t.Errorf("step 0 = %+v, want tool_call from CISA KEV", got[0])
+	}
+	if got[1].Kind != "tool_result" || got[1].Status != "ok" {
+		t.Errorf("step 1 = %+v, want ok tool_result", got[1])
+	}
+	if got[2].Kind != "done" {
+		t.Errorf("step 2 = %+v, want done", got[2])
 	}
 }

@@ -24,7 +24,7 @@ func TestStubNarratorIncludesEveryStep(t *testing.T) {
 			{Description: "powershell dumped lsass", Confidence: 0.88, TS: 2},
 		},
 	}
-	got, err := n.Narrate(context.Background(), chain)
+	got, err := n.Narrate(context.Background(), chain, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -78,7 +78,7 @@ func TestClaudeNarratorSendsCachedSystemPrompt(t *testing.T) {
 	got, err := n.Narrate(context.Background(), types.ChainResultPayload{
 		Confidence: 0.91,
 		Steps:      []types.ChainStep{{Description: "winword spawned powershell", Confidence: 0.9, TS: 1}},
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("narrate: %v", err)
 	}
@@ -102,7 +102,7 @@ func TestClaudeNarratorParsesCodeFence(t *testing.T) {
 	defer srv.Close()
 
 	n := NewClaude(ClaudeConfig{APIKey: "k", BaseURL: srv.URL})
-	got, err := n.Narrate(context.Background(), types.ChainResultPayload{})
+	got, err := n.Narrate(context.Background(), types.ChainResultPayload{}, nil)
 	if err != nil {
 		t.Fatalf("narrate: %v", err)
 	}
@@ -118,7 +118,7 @@ func TestClaudeNarratorReturnsErrorOnNon2xx(t *testing.T) {
 	}))
 	defer srv.Close()
 	n := NewClaude(ClaudeConfig{APIKey: "k", BaseURL: srv.URL})
-	if _, err := n.Narrate(context.Background(), types.ChainResultPayload{}); err == nil {
+	if _, err := n.Narrate(context.Background(), types.ChainResultPayload{}, nil); err == nil {
 		t.Fatal("want error on 429, got nil")
 	}
 }
@@ -257,7 +257,7 @@ func TestClaudeNarratorToolUseLoop(t *testing.T) {
 	got, err := n.Narrate(context.Background(), types.ChainResultPayload{
 		Confidence: 0.9,
 		Steps:      []types.ChainStep{{Description: "winword spawned cmd", Confidence: 0.9, TS: 1}},
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("narrate: %v", err)
 	}
@@ -266,6 +266,64 @@ func TestClaudeNarratorToolUseLoop(t *testing.T) {
 	}
 	if callCount.Load() != 2 {
 		t.Errorf("API calls = %d, want 2", callCount.Load())
+	}
+}
+
+func TestClaudeNarratorEmitsActivity(t *testing.T) {
+	t.Parallel()
+	var callCount atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		callCount.Add(1)
+		if callCount.Load() == 1 {
+			_ = json.NewEncoder(w).Encode(claudeResponse{
+				StopReason: "tool_use",
+				Content: []claudeContentBlock{
+					{Type: "tool_use", ID: "tu_1", Name: "lookup_process_reputation", Input: map[string]any{"name": "lsass.exe"}},
+				},
+			})
+			return
+		}
+		_ = json.NewEncoder(w).Encode(claudeResponse{
+			StopReason: "end_turn",
+			Content: []claudeContentBlock{
+				{Type: "text", Text: `{"text":"done.","hypotheses":[],"actions":[]}`},
+			},
+		})
+	}))
+	defer srv.Close()
+
+	n := NewClaude(ClaudeConfig{
+		APIKey:  "k",
+		BaseURL: srv.URL,
+		Searcher: &fakeSearcher{fn: func(_ context.Context, _ string) ([]map[string]any, error) {
+			return []map[string]any{{"reputation": "malicious", "category": "credential-access"}}, nil
+		}},
+	})
+
+	var got []types.AgentActivityPayload
+	emit := func(a types.AgentActivityPayload) { got = append(got, a) }
+	if _, err := n.Narrate(context.Background(), types.ChainResultPayload{}, emit); err != nil {
+		t.Fatalf("narrate: %v", err)
+	}
+
+	if len(got) != 3 {
+		t.Fatalf("activity steps = %d, want 3 (tool_call, tool_result, done): %+v", len(got), got)
+	}
+	if got[0].Kind != "tool_call" || got[0].Tool != "lookup_process_reputation" {
+		t.Errorf("step 0 = %+v, want tool_call lookup_process_reputation", got[0])
+	}
+	// The source must be the honest local-Splunk label, not "external".
+	if got[0].Source != "Splunk threat_intel index" {
+		t.Errorf("step 0 source = %q, want %q", got[0].Source, "Splunk threat_intel index")
+	}
+	if got[1].Kind != "tool_result" || got[1].Status != "ok" {
+		t.Errorf("step 1 = %+v, want ok tool_result", got[1])
+	}
+	if !strings.Contains(got[1].Detail, "malicious") {
+		t.Errorf("step 1 detail = %q, want malicious", got[1].Detail)
+	}
+	if got[2].Kind != "done" {
+		t.Errorf("step 2 = %+v, want done", got[2])
 	}
 }
 
@@ -288,7 +346,7 @@ func TestClaudeNarratorNoSearcherSkipsTools(t *testing.T) {
 	defer srv.Close()
 
 	n := NewClaude(ClaudeConfig{APIKey: "k", BaseURL: srv.URL})
-	if _, err := n.Narrate(context.Background(), types.ChainResultPayload{}); err != nil {
+	if _, err := n.Narrate(context.Background(), types.ChainResultPayload{}, nil); err != nil {
 		t.Fatalf("narrate: %v", err)
 	}
 }
@@ -332,7 +390,7 @@ func TestClaudeNarratorToolSearchError(t *testing.T) {
 			return nil, fmt.Errorf("splunk down")
 		}},
 	})
-	got, err := n.Narrate(context.Background(), types.ChainResultPayload{})
+	got, err := n.Narrate(context.Background(), types.ChainResultPayload{}, nil)
 	if err != nil {
 		t.Fatalf("want narration despite search error, got: %v", err)
 	}
@@ -362,7 +420,7 @@ func TestClaudeNarratorMaxRoundsExceeded(t *testing.T) {
 			return nil, nil
 		}},
 	})
-	_, err := n.Narrate(context.Background(), types.ChainResultPayload{})
+	_, err := n.Narrate(context.Background(), types.ChainResultPayload{}, nil)
 	if err == nil {
 		t.Fatal("want error when max rounds exceeded, got nil")
 	}

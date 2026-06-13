@@ -16,6 +16,7 @@ function inc(partial: Partial<IncidentState> & { id: string }): IncidentState {
     firstSeen: partial.firstSeen ?? 0,
     awaitingNarration: partial.awaitingNarration ?? false,
     awaitingIntel: partial.awaitingIntel ?? false,
+    activity: partial.activity ?? [],
   }
 }
 

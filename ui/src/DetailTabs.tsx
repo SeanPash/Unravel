@@ -1,11 +1,12 @@
 import { LogsPanel } from './LogsPanel'
 import { AttackPanel } from './AttackPanel'
 import { ThreatIntelPanel } from './ThreatIntelPanel'
+import { InvestigationTracePanel } from './InvestigationTracePanel'
 import type { RelatedLog } from './logFilter'
 import type { TimelinePhase } from './timeline'
-import type { ChainResultPayload, WsEdge, ThreatIntelPayload, LogEventPayload } from './ws'
+import type { ChainResultPayload, WsEdge, ThreatIntelPayload, LogEventPayload, AgentActivityPayload } from './ws'
 
-export type DetailTab = 'logs' | 'attack' | 'intel'
+export type DetailTab = 'trace' | 'logs' | 'attack' | 'intel'
 
 export interface DetailTabsProps {
   activeTab: DetailTab
@@ -24,6 +25,9 @@ export interface DetailTabsProps {
   // Threat Intel
   intel: ThreatIntelPayload | null
   awaitingIntel: boolean
+  // Investigation trace: live AI agent tool-use feed for the active incident.
+  activity: AgentActivityPayload[]
+  agentsBusy: boolean
   // MITRE technique navigation, shared by the ATT&CK and intel tabs.
   onTechniqueSelect?: (techniqueId: string) => void
   activeTechniqueId?: string | null
@@ -31,6 +35,7 @@ export interface DetailTabsProps {
 }
 
 const TABS: { id: DetailTab; label: string }[] = [
+  { id: 'trace', label: 'Investigation' },
   { id: 'logs', label: 'Logs' },
   { id: 'attack', label: 'MITRE ATT&CK' },
   { id: 'intel', label: 'Threat Intel' },
@@ -55,6 +60,13 @@ export function DetailTabs(props: DetailTabsProps) {
         ))}
       </div>
       <div className="dash-panel-body detail-tabs-body">
+        {activeTab === 'trace' && (
+          <InvestigationTracePanel
+            activity={props.activity}
+            busy={props.agentsBusy}
+            hasChain={props.hasChain}
+          />
+        )}
         {activeTab === 'logs' && (
           <LogsPanel
             logs={props.logs}

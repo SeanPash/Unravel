@@ -17,14 +17,23 @@ const baseProps = {
   // Intel
   intel: null,
   awaitingIntel: false,
+  // Investigation trace
+  activity: [],
+  agentsBusy: false,
 }
 
 describe('DetailTabs', () => {
-  it('renders three tab buttons', () => {
+  it('renders all tab buttons', () => {
     const { getByRole } = render(<DetailTabs {...baseProps} />)
+    expect(getByRole('tab', { name: /investigation/i })).toBeTruthy()
     expect(getByRole('tab', { name: /logs/i })).toBeTruthy()
     expect(getByRole('tab', { name: /att&ck/i })).toBeTruthy()
     expect(getByRole('tab', { name: /threat intel/i })).toBeTruthy()
+  })
+
+  it('renders the Investigation trace panel when activeTab is trace', () => {
+    const { container } = render(<DetailTabs {...baseProps} activeTab="trace" />)
+    expect(container.querySelector('.trace-panel')).toBeTruthy()
   })
 
   it('shows the Logs panel by default', () => {

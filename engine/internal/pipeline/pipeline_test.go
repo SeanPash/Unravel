@@ -114,7 +114,7 @@ func TestPipelineProducesChainResultAndNarration(t *testing.T) {
 
 type stubIntelAgent struct{ calls int }
 
-func (s *stubIntelAgent) Enrich(_ context.Context, _ types.ChainResultPayload) (types.ThreatIntelPayload, error) {
+func (s *stubIntelAgent) Enrich(_ context.Context, _ types.ChainResultPayload, _ ai.ActivityFunc) (types.ThreatIntelPayload, error) {
 	s.calls++
 	return types.ThreatIntelPayload{Status: "ok", Summary: "x", Techniques: []types.ThreatIntelTechnique{}}, nil
 }
@@ -198,6 +198,72 @@ checks:
 	}
 	if agent.calls != 1 {
 		t.Errorf("intel agent calls = %d, want 1", agent.calls)
+	}
+}
+
+// The narrator's tool-use steps must reach clients as agent_activity messages,
+// stamped with the incident id, so the UI can show the agent working live.
+func TestPipelineBroadcastsAgentActivity(t *testing.T) {
+	t.Parallel()
+	base := time.Date(2026, 6, 5, 19, 30, 0, 0, time.UTC)
+	events := []splunk.RawEvent{
+		spawnEvent(base, "WS01", 4000, "C:\\Windows\\explorer.exe", 4120, "C:\\Office\\WINWORD.EXE"),
+		spawnEvent(base.Add(5*time.Second), "WS01", 4120, "C:\\Office\\WINWORD.EXE", 4880, "C:\\Windows\\powershell.exe"),
+		spawnEvent(base.Add(10*time.Second), "WS01", 4880, "C:\\Windows\\powershell.exe", 5001, "C:\\Tools\\mimikatz.exe"),
+	}
+	src := splunk.NewMockFromEntries(events)
+	src.Start()
+
+	g := graph.New()
+	sc := scorer.New(scorer.Config{Threshold: 0.01})
+	bcast := api.NewBroadcaster()
+	defer bcast.Close()
+	sub := bcast.Subscribe()
+
+	p, err := New(Config{
+		Source:         src,
+		Graph:          g,
+		Scorer:         sc,
+		Narrator:       ai.NewStub(),
+		Broadcaster:    bcast,
+		SignalDebounce: 100 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- p.Run(ctx) }()
+
+	var act types.AgentActivityPayload
+	got := false
+	deadline := time.After(3 * time.Second)
+	for !got {
+		select {
+		case msg, ok := <-sub.Out():
+			if !ok {
+				t.Fatal("subscriber closed before agent_activity")
+			}
+			if msg.Type == types.MsgTypeAgentActivity {
+				if err := json.Unmarshal(msg.Payload, &act); err != nil {
+					t.Fatalf("decode agent_activity: %v", err)
+				}
+				got = true
+			}
+		case <-deadline:
+			t.Fatal("timed out waiting for agent_activity message")
+		}
+	}
+	cancel()
+	<-done
+
+	if act.Agent != "narrator" {
+		t.Errorf("agent = %q, want narrator", act.Agent)
+	}
+	if act.IncidentID == "" {
+		t.Error("agent_activity missing incident_id")
 	}
 }
 
