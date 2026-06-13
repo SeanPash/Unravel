@@ -148,7 +148,10 @@ export function reducer(state: AppState, action: Action): AppState {
         // A fresh extraction re-runs the agents, so start a new activity feed.
         activity: [],
       }
-      const isNewIncident = !prev
+      // A placeholder created by an out-of-order narration/intel/activity
+      // (prev with no chain yet) is not a "seen" incident, so its real
+      // chain_result still counts as new and activates + opens the feed.
+      const isNewIncident = !prev?.chain
       return {
         ...state,
         incidents: { ...state.incidents, [id]: incident },
@@ -168,6 +171,8 @@ export function reducer(state: AppState, action: Action): AppState {
           ...state.incidents,
           [id]: { ...base, narration: action.payload, awaitingNarration: false },
         },
+        // If output arrives before any incident is selected, surface it.
+        activeIncidentId: state.activeIncidentId ?? id,
       }
     }
     case 'threat_intel': {
@@ -179,6 +184,7 @@ export function reducer(state: AppState, action: Action): AppState {
           ...state.incidents,
           [id]: { ...base, threatIntel: action.payload, awaitingIntel: false },
         },
+        activeIncidentId: state.activeIncidentId ?? id,
       }
     }
     case 'agent_activity': {
