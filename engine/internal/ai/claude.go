@@ -78,10 +78,7 @@ func (c *ClaudeNarrator) Narrate(ctx context.Context, chain types.ChainResultPay
 		Content: []claudeContentBlock{{Type: "text", Text: "Chain JSON:\n" + string(chainJSON)}},
 	}}
 
-	var tools []claudeTool
-	if c.cfg.Searcher != nil {
-		tools = narratorTools
-	}
+	tools := c.toolMenu()
 
 	for i := 0; i < maxRounds; i++ {
 		resp, err := c.doRequest(ctx, claudeRequest{
@@ -122,14 +119,21 @@ func (c *ClaudeNarrator) Narrate(ctx context.Context, chain types.ChainResultPay
 			if b.Type != "tool_use" {
 				continue
 			}
-			label, source := toolCallActivity(b.Name, b.Input)
-			if b.Name == "splunk_search" && c.cfg.SearcherName != "" {
-				source = c.cfg.SearcherName
+			var content string
+			if b.Name == "splunk_nl_search" {
+				// splunk_nl_search makes two MCP calls (generate, then run) and
+				// owns its own activity emission so the feed names both backends.
+				content = c.dispatchNLSearch(ctx, b.Input, emit)
+			} else {
+				label, source := toolCallActivity(b.Name, b.Input)
+				if b.Name == "splunk_search" && c.cfg.SearcherName != "" {
+					source = c.cfg.SearcherName
+				}
+				emit.emit(types.AgentActivityPayload{Kind: "tool_call", Tool: b.Name, Source: source, Label: label})
+				content = c.dispatchTool(ctx, b.Name, b.Input)
+				detail, status := toolResultActivity(b.Name, content)
+				emit.emit(types.AgentActivityPayload{Kind: "tool_result", Tool: b.Name, Source: source, Label: label, Detail: detail, Status: status})
 			}
-			emit.emit(types.AgentActivityPayload{Kind: "tool_call", Tool: b.Name, Source: source, Label: label})
-			content := c.dispatchTool(ctx, b.Name, b.Input)
-			detail, status := toolResultActivity(b.Name, content)
-			emit.emit(types.AgentActivityPayload{Kind: "tool_result", Tool: b.Name, Source: source, Label: label, Detail: detail, Status: status})
 			results = append(results, claudeContentBlock{
 				Type:      "tool_result",
 				ToolUseID: b.ID,
@@ -267,6 +271,38 @@ var narratorTools = []claudeTool{
 	},
 }
 
+// splunkNLSearchTool is offered only when the configured Searcher implements
+// SPLGenerator (live+MCP mode). It is appended to the menu, never part of the
+// static narratorTools, so the menu stays constant within a mode.
+var splunkNLSearchTool = claudeTool{
+	Name:        "splunk_nl_search",
+	Description: "Ask Splunk's AI Assistant to turn a natural-language question into SPL and run it, to gather evidence the other tools do not cover. Provide a plain-English question, e.g. \"which accounts logged into the domain controller in the last hour?\".",
+	InputSchema: claudeToolSchema{
+		Type: "object",
+		Properties: map[string]claudeSchemaProperty{
+			"question": {Type: "string", Description: "A natural-language question about the environment, e.g. \"show recent failed logons for administrator\""},
+		},
+		Required: []string{"question"},
+	},
+}
+
+// toolMenu returns the tool list for this narrator. The four base tools require
+// a Searcher; splunk_nl_search is appended only when that Searcher also
+// implements SPLGenerator (live+MCP mode). The menu is therefore constant within
+// a run mode, so the cached tools+system prefix stays byte-identical and prompt
+// caching keeps hitting.
+func (c *ClaudeNarrator) toolMenu() []claudeTool {
+	if c.cfg.Searcher == nil {
+		return nil
+	}
+	if _, ok := c.cfg.Searcher.(SPLGenerator); ok {
+		menu := make([]claudeTool, len(narratorTools), len(narratorTools)+1)
+		copy(menu, narratorTools)
+		return append(menu, splunkNLSearchTool)
+	}
+	return narratorTools
+}
+
 // dispatchTool builds the SPL for name, runs it via the configured Searcher,
 // and returns a JSON string suitable for a tool_result content block.
 func (c *ClaudeNarrator) dispatchTool(ctx context.Context, name string, input map[string]any) string {
@@ -279,6 +315,68 @@ func (c *ClaudeNarrator) dispatchTool(ctx context.Context, name string, input ma
 		return `{"error":"search unavailable"}`
 	}
 	b, _ := json.Marshal(map[string]any{"rows": rows})
+	return string(b)
+}
+
+// nlSearchRunSource is the activity source for the run sub-step: the MCP backend
+// that executes the AI-generated SPL. Falls back to a literal when SearcherName
+// is unset (it is set to "Splunk MCP Server" in live+MCP mode).
+func (c *ClaudeNarrator) nlSearchRunSource() string {
+	if c.cfg.SearcherName != "" {
+		return c.cfg.SearcherName
+	}
+	return "Splunk MCP Server"
+}
+
+// dispatchNLSearch handles the splunk_nl_search tool: it asks the Splunk AI
+// Assistant to generate SPL from the question, guards it read-only, runs it via
+// the Searcher, and returns a {generated_spl, rows} tool result. It emits its
+// own two activity sub-steps (AI Assistant generate, then MCP run) so the feed
+// honestly names both backends, and degrades to an error tool-result at each
+// failure point without affecting the narrator's other tools.
+func (c *ClaudeNarrator) dispatchNLSearch(ctx context.Context, input map[string]any, emit ActivityFunc) string {
+	gen, ok := c.cfg.Searcher.(SPLGenerator)
+	if !ok {
+		return `{"error":"nl search unavailable"}`
+	}
+	question, _ := input["question"].(string)
+	question = strings.TrimSpace(question)
+	if question == "" {
+		return `{"error":"missing question"}`
+	}
+
+	const genSource = "Splunk AI Assistant"
+	genLabel := nlGenerateLabel(question)
+	emit.emit(types.AgentActivityPayload{Kind: "tool_call", Tool: "splunk_nl_search", Source: genSource, Label: genLabel})
+
+	spl, err := gen.GenerateSPL(ctx, question)
+	if err != nil {
+		emit.emit(types.AgentActivityPayload{Kind: "tool_result", Tool: "splunk_nl_search", Source: genSource, Label: genLabel, Detail: "SPL generation unavailable", Status: "error"})
+		return `{"error":"spl generation unavailable"}`
+	}
+	spl = strings.TrimSpace(spl)
+	if spl == "" {
+		emit.emit(types.AgentActivityPayload{Kind: "tool_result", Tool: "splunk_nl_search", Source: genSource, Label: genLabel, Detail: "AI Assistant returned no SPL", Status: "error"})
+		return `{"error":"ai assistant returned no spl"}`
+	}
+	if !isReadOnlySPL(spl) {
+		emit.emit(types.AgentActivityPayload{Kind: "tool_result", Tool: "splunk_nl_search", Source: genSource, Label: genLabel, Detail: "refused: generated SPL is not read-only", Status: "error"})
+		return `{"error":"refused: only read-only SPL is permitted"}`
+	}
+	emit.emit(types.AgentActivityPayload{Kind: "tool_result", Tool: "splunk_nl_search", Source: genSource, Label: genLabel, Detail: truncate(spl, 80), Status: "ok"})
+
+	runSource := c.nlSearchRunSource()
+	const runLabel = "Running AI-generated SPL"
+	emit.emit(types.AgentActivityPayload{Kind: "tool_call", Tool: "splunk_nl_search", Source: runSource, Label: runLabel})
+	rows, err := c.cfg.Searcher.Search(ctx, spl)
+	if err != nil {
+		emit.emit(types.AgentActivityPayload{Kind: "tool_result", Tool: "splunk_nl_search", Source: runSource, Label: runLabel, Detail: "search unavailable", Status: "error"})
+		return `{"error":"search unavailable"}`
+	}
+	detail, status := nlRunResult(rows)
+	emit.emit(types.AgentActivityPayload{Kind: "tool_result", Tool: "splunk_nl_search", Source: runSource, Label: runLabel, Detail: detail, Status: status})
+
+	b, _ := json.Marshal(map[string]any{"generated_spl": spl, "rows": rows})
 	return string(b)
 }
 

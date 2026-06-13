@@ -564,3 +564,100 @@ func TestClaudeNarratorSplunkSearchSourceUsesSearcherName(t *testing.T) {
 		t.Errorf("source = %q, want override %q", got[0].Source, "Splunk MCP Server")
 	}
 }
+
+// fakeNLSearcher implements both SplunkSearcher and SPLGenerator so the narrator
+// offers splunk_nl_search and dispatchNLSearch can chain generate -> run.
+type fakeNLSearcher struct {
+	genSPL    string
+	genErr    error
+	rows      []map[string]any
+	searchErr error
+	searched  []string
+}
+
+func (f *fakeNLSearcher) GenerateSPL(_ context.Context, _ string) (string, error) {
+	return f.genSPL, f.genErr
+}
+
+func (f *fakeNLSearcher) Search(_ context.Context, q string) ([]map[string]any, error) {
+	f.searched = append(f.searched, q)
+	return f.rows, f.searchErr
+}
+
+func TestNarratorToolMenuGatesNLSearch(t *testing.T) {
+	t.Parallel()
+	hasTool := func(tools []claudeTool, name string) bool {
+		for _, tl := range tools {
+			if tl.Name == name {
+				return true
+			}
+		}
+		return false
+	}
+
+	// SPLGenerator-capable searcher: splunk_nl_search present, 5 tools.
+	withGen := NewClaude(ClaudeConfig{APIKey: "k", Searcher: &fakeNLSearcher{}})
+	if menu := withGen.toolMenu(); len(menu) != 5 || !hasTool(menu, "splunk_nl_search") {
+		t.Errorf("with SPLGenerator: got %d tools, splunk_nl_search present=%v", len(menu), hasTool(menu, "splunk_nl_search"))
+	}
+
+	// Plain searcher (Search only): splunk_nl_search absent, 4 tools.
+	plain := NewClaude(ClaudeConfig{APIKey: "k", Searcher: &fakeSearcher{fn: func(context.Context, string) ([]map[string]any, error) { return nil, nil }}})
+	if menu := plain.toolMenu(); len(menu) != 4 || hasTool(menu, "splunk_nl_search") {
+		t.Errorf("plain searcher: got %d tools, splunk_nl_search present=%v", len(menu), hasTool(menu, "splunk_nl_search"))
+	}
+
+	// No searcher: no tools.
+	none := NewClaude(ClaudeConfig{APIKey: "k"})
+	if menu := none.toolMenu(); len(menu) != 0 {
+		t.Errorf("nil searcher: got %d tools, want 0", len(menu))
+	}
+}
+
+func TestDispatchNLSearchChainsGenerateGuardRun(t *testing.T) {
+	t.Parallel()
+	f := &fakeNLSearcher{
+		genSPL: "search index=sysmon EventCode=1 | head 5",
+		rows:   []map[string]any{{"EventCode": "1", "Image": "powershell.exe"}},
+	}
+	n := NewClaude(ClaudeConfig{APIKey: "k", Searcher: f, SearcherName: "Splunk MCP Server"})
+
+	var got []types.AgentActivityPayload
+	emit := func(a types.AgentActivityPayload) { got = append(got, a) }
+
+	content := n.dispatchNLSearch(context.Background(), map[string]any{"question": "recent process creations"}, emit)
+
+	if len(f.searched) != 1 || f.searched[0] != "search index=sysmon EventCode=1 | head 5" {
+		t.Fatalf("searched = %v, want the generated SPL", f.searched)
+	}
+	if !strings.Contains(content, "generated_spl") || !strings.Contains(content, "powershell.exe") {
+		t.Errorf("content = %q, want generated_spl and rows", content)
+	}
+	var sawGen, sawRun bool
+	for _, a := range got {
+		if a.Source == "Splunk AI Assistant" {
+			sawGen = true
+		}
+		if a.Source == "Splunk MCP Server" {
+			sawRun = true
+		}
+	}
+	if !sawGen || !sawRun {
+		t.Errorf("activity sources: sawGen=%v sawRun=%v, want both; got %+v", sawGen, sawRun, got)
+	}
+}
+
+func TestDispatchNLSearchRefusesMutatingSPL(t *testing.T) {
+	t.Parallel()
+	f := &fakeNLSearcher{genSPL: "search index=x | delete"}
+	n := NewClaude(ClaudeConfig{APIKey: "k", Searcher: f})
+
+	content := n.dispatchNLSearch(context.Background(), map[string]any{"question": "wipe it"}, func(types.AgentActivityPayload) {})
+
+	if !strings.Contains(content, "refused") {
+		t.Errorf("content = %q, want a refusal", content)
+	}
+	if len(f.searched) != 0 {
+		t.Errorf("Search was called with %v, want never (mutating SPL must not run)", f.searched)
+	}
+}

@@ -116,6 +116,21 @@ func toolResultActivity(tool, content string) (detail, status string) {
 	}
 }
 
+// nlGenerateLabel describes the splunk_nl_search generate sub-step (the Splunk
+// AI Assistant turning the question into SPL).
+func nlGenerateLabel(question string) string {
+	return fmt.Sprintf("Asking Splunk AI Assistant to write SPL for: %s", truncate(question, 80))
+}
+
+// nlRunResult summarizes the rows the AI-generated SPL returned, mirroring the
+// splunk_search result summary.
+func nlRunResult(rows []map[string]any) (detail, status string) {
+	if len(rows) == 0 {
+		return "no results", "empty"
+	}
+	return fmt.Sprintf("%d result row(s)", len(rows)), "ok"
+}
+
 func strFromInput(input map[string]any, key, fallback string) string {
 	if s, ok := input[key].(string); ok && s != "" {
 		return s
