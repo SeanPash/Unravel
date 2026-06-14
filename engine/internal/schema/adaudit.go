@@ -10,10 +10,7 @@ import (
 // events. Returns the typed event as any so the caller can type-switch. Returns
 // ErrUnsupportedEvent for AD audit EIDs the engine does not care about.
 func ParseADAudit(raw map[string]any) (any, error) {
-	eid := asString(raw, "EventID")
-	if eid == "" {
-		eid = asString(raw, "EventCode")
-	}
+	eid := firstField(raw, "EventID", "EventCode", "event_id", "signature_id")
 	switch eid {
 	case "4720":
 		return ParseUserCreated(raw)
@@ -41,12 +38,12 @@ func ParseUserCreated(raw map[string]any) (types.ADEvent, error) {
 		Host:         hostFrom(raw),
 		ObjectType:   "User",
 		Operation:    "Created",
-		Target:       asString(raw, "TargetUserName"),
-		TargetDomain: asString(raw, "TargetDomainName"),
-		TargetSID:    asString(raw, "TargetSid"),
-		Actor:        asString(raw, "SubjectUserName"),
-		ActorDomain:  asString(raw, "SubjectDomainName"),
-		ActorSID:     asString(raw, "SubjectUserSid"),
+		Target:       firstField(raw, "TargetUserName", "Account_Name", "user"),
+		TargetDomain: firstField(raw, "TargetDomainName"),
+		TargetSID:    firstField(raw, "TargetSid", "TargetUserSid"),
+		Actor:        firstField(raw, "SubjectUserName", "src_user"),
+		ActorDomain:  firstField(raw, "SubjectDomainName"),
+		ActorSID:     firstField(raw, "SubjectUserSid"),
 	}, nil
 }
 
@@ -69,14 +66,14 @@ func parseGroupMemberAdded(raw map[string]any, objectType string) (types.ADEvent
 		Host:         hostFrom(raw),
 		ObjectType:   objectType,
 		Operation:    "MemberAdded",
-		Target:       asString(raw, "TargetUserName"),
-		TargetDomain: asString(raw, "TargetDomainName"),
-		TargetSID:    asString(raw, "TargetSid"),
-		Member:       asString(raw, "MemberName"),
-		MemberSID:    asString(raw, "MemberSid"),
-		Actor:        asString(raw, "SubjectUserName"),
-		ActorDomain:  asString(raw, "SubjectDomainName"),
-		ActorSID:     asString(raw, "SubjectUserSid"),
+		Target:       firstField(raw, "TargetUserName", "group_name"),
+		TargetDomain: firstField(raw, "TargetDomainName"),
+		TargetSID:    firstField(raw, "TargetSid"),
+		Member:       firstField(raw, "MemberName", "member"),
+		MemberSID:    firstField(raw, "MemberSid"),
+		Actor:        firstField(raw, "SubjectUserName", "src_user"),
+		ActorDomain:  firstField(raw, "SubjectDomainName"),
+		ActorSID:     firstField(raw, "SubjectUserSid"),
 	}, nil
 }
 
@@ -85,7 +82,7 @@ func ParseDirectoryObjectModified(raw map[string]any) (types.ADEvent, error) {
 	if err != nil {
 		return types.ADEvent{}, err
 	}
-	objectType := asString(raw, "ObjectClass")
+	objectType := firstField(raw, "ObjectClass", "object_class")
 	if objectType == "" {
 		objectType = "DirectoryObject"
 	}
@@ -95,11 +92,11 @@ func ParseDirectoryObjectModified(raw map[string]any) (types.ADEvent, error) {
 		Host:           hostFrom(raw),
 		ObjectType:     objectType,
 		Operation:      "Modified",
-		Target:         asString(raw, "ObjectDN"),
-		Attribute:      asString(raw, "AttributeLDAPDisplayName"),
-		AttributeValue: asString(raw, "AttributeValue"),
-		Actor:          asString(raw, "SubjectUserName"),
-		ActorDomain:    asString(raw, "SubjectDomainName"),
-		ActorSID:       asString(raw, "SubjectUserSid"),
+		Target:         firstField(raw, "ObjectDN", "object_dn", "dn"),
+		Attribute:      firstField(raw, "AttributeLDAPDisplayName", "attribute"),
+		AttributeValue: firstField(raw, "AttributeValue", "attribute_value"),
+		Actor:          firstField(raw, "SubjectUserName", "src_user"),
+		ActorDomain:    firstField(raw, "SubjectDomainName"),
+		ActorSID:       firstField(raw, "SubjectUserSid"),
 	}, nil
 }

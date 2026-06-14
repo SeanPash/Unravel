@@ -12,8 +12,38 @@ import (
 // These helpers coerce defensively without losing precision on integer IDs.
 
 func asString(raw map[string]any, key string) string {
-	v, ok := raw[key]
-	if !ok || v == nil {
+	return coerceString(raw[key])
+}
+
+// firstField returns the coerced string value of the first present, non-empty
+// key in the list. It lets parsers prefer a primary TA field name (the first
+// key) and fall back to CIM-normalized or raw-EventData alternates when a real
+// Splunk instance ships a different field layout. The primary field always
+// wins when present and non-empty.
+func firstField(raw map[string]any, keys ...string) string {
+	for _, k := range keys {
+		if s := coerceString(raw[k]); s != "" {
+			return s
+		}
+	}
+	return ""
+}
+
+// firstIntOpt returns the first parseable int among the given keys, or 0 if
+// none parse. Like asIntOpt but with CIM alias fallbacks.
+func firstIntOpt(raw map[string]any, keys ...string) int {
+	for _, k := range keys {
+		if n, err := asInt(raw, k); err == nil {
+			return n
+		}
+	}
+	return 0
+}
+
+// coerceString turns a raw JSON value into a string without losing integer
+// precision. Shared by asString and firstField.
+func coerceString(v any) string {
+	if v == nil {
 		return ""
 	}
 	switch x := v.(type) {
@@ -72,7 +102,25 @@ func asIntOpt(raw map[string]any, key string) int {
 	return n
 }
 
-// parseTime tries _time first (preferred — Splunk's authoritative timestamp),
+// firstInt returns the parsed int of the first present, parseable key. Errors
+// only if none of the keys yield a parseable value. Use for required numeric
+// fields that may arrive under a CIM alias.
+func firstInt(raw map[string]any, keys ...string) (int, error) {
+	for _, k := range keys {
+		if _, ok := raw[k]; !ok {
+			continue
+		}
+		if n, err := asInt(raw, k); err == nil {
+			return n, nil
+		}
+	}
+	if len(keys) == 1 {
+		return asInt(raw, keys[0])
+	}
+	return 0, fmt.Errorf("no parseable int among %v", keys)
+}
+
+// parseTime tries _time first (preferred - Splunk's authoritative timestamp),
 // falling back to a Sysmon UtcTime-style field. Returns zero time + error if
 // neither is parseable.
 func parseTime(raw map[string]any, fallbackKey string) (time.Time, error) {
@@ -103,6 +151,10 @@ func parseFlexibleTime(s string) (time.Time, error) {
 	layouts := []string{
 		time.RFC3339Nano,
 		time.RFC3339,
+		// Numeric offset without a colon, with and without fractional seconds.
+		// These are common Splunk %z forms (e.g. "2026-06-05T19:30:00.000-0700").
+		"2006-01-02T15:04:05.000-0700",
+		"2006-01-02T15:04:05-0700",
 		"2006-01-02 15:04:05.000",
 		"2006-01-02 15:04:05",
 	}
@@ -120,13 +172,10 @@ func parseFlexibleTime(s string) (time.Time, error) {
 	return time.Time{}, fmt.Errorf("unrecognized time format: %q", s)
 }
 
-// hostFrom returns host with fallbacks (Splunk uses "host", winlogbeat ships
-// "ComputerName" in the event payload).
+// hostFrom returns host with CIM/TA fallbacks (Splunk uses "host", winlogbeat
+// ships "ComputerName", CIM normalizes to "dest"/"dvc").
 func hostFrom(raw map[string]any) string {
-	if s := asString(raw, "host"); s != "" {
-		return s
-	}
-	return asString(raw, "ComputerName")
+	return firstField(raw, "host", "ComputerName", "Computer", "dest", "dvc", "host_name")
 }
 
 // eventID returns a stable identifier for the raw event. Splunk's RecordNumber

@@ -2,7 +2,6 @@ package intel
 
 import (
 	"context"
-	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -23,11 +22,14 @@ const (
 // RESTConfig configures the live source. URLs default to the public endpoints;
 // tests override them. NVDKey, when set, is sent as the apiKey header to lift
 // the NVD rate limit.
+//
+// TLS verification is always enforced here: CISA KEV and NVD are public,
+// CA-signed endpoints, so there is no legitimate reason to skip verification.
+// Deliberately no Insecure knob.
 type RESTConfig struct {
 	KEVURL     string
 	NVDURL     string
 	NVDKey     string
-	Insecure   bool
 	HTTPClient *http.Client
 }
 
@@ -51,11 +53,9 @@ func NewRESTSource(cfg RESTConfig) *RESTSource {
 	}
 	client := cfg.HTTPClient
 	if client == nil {
-		tr := &http.Transport{}
-		if cfg.Insecure {
-			tr.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
-		}
-		client = &http.Client{Timeout: 15 * time.Second, Transport: tr}
+		// No Insecure path: these are public CA-signed endpoints, so TLS
+		// verification stays on. Use the default transport's verification.
+		client = &http.Client{Timeout: 15 * time.Second}
 	}
 	return &RESTSource{cfg: cfg, client: client}
 }

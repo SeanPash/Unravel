@@ -21,15 +21,17 @@ type RESTSearcher struct {
 }
 
 // NewRESTSearcher returns a RESTSearcher. Set insecure=true to skip TLS
-// verification (required for GOAD self-signed certs).
-func NewRESTSearcher(baseURL, token string, insecure bool) *RESTSearcher {
+// verification (required for GOAD self-signed certs). tlsCfg, when non-nil,
+// supplies a RootCAs pool for a corporate private CA; insecure still wins on
+// top of it.
+func NewRESTSearcher(baseURL, token string, insecure bool, tlsCfg *tls.Config) *RESTSearcher {
 	return &RESTSearcher{
 		baseURL: baseURL,
 		token:   token,
 		client: &http.Client{
 			Timeout: 10 * time.Second,
 			Transport: &http.Transport{
-				TLSClientConfig: &tls.Config{InsecureSkipVerify: insecure},
+				TLSClientConfig: buildTLSConfig(tlsCfg, insecure),
 			},
 		},
 	}
