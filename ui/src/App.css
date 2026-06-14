@@ -144,6 +144,25 @@
   grid-template-columns: 8fr 77fr 15fr;
   min-height: 0;
   gap: var(--space-2);
+  /* Sits above the detail row so the row/corner resize handles, which hang
+     down into the gap between the two, paint over the detail panel's top. */
+  position: relative;
+  z-index: 2;
+}
+
+/* Each section lives in a positioning cell so its resize handles can overhang
+   into the surrounding gutters without being clipped by the panel's own
+   overflow:hidden. The panel fills the cell; absolute handles sit on top. */
+.dash-cell {
+  position: relative;
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+}
+
+.dash-cell > .dash-panel {
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
 /* ─── Dashboard panel chrome ──────────────────────────────────────────── */
@@ -159,19 +178,64 @@
   overflow: hidden;
 }
 
-/* Panel title: evidence-section label with left accent bar */
+/* Panel title: a dropdown-style toggle with a left accent bar. Clicking it
+   collapses the panel; the caret and hover state advertise that the whole bar
+   is clickable. Styled as a bare button so the label, accent bar, and live dot
+   keep reading the same. */
 .dash-panel-title {
   flex-shrink: 0;
   position: relative;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
   padding: 9px var(--space-3) 9px 15px;
   font-family: var(--font-display);
   font-size: 11px;
   font-weight: 500;
   letter-spacing: 0.14em;
   text-transform: uppercase;
+  text-align: left;
   color: var(--text-muted);
   background: rgba(0, 0, 0, 0.25);
+  border: none;
   border-bottom: 1px solid var(--border-subtle);
+  cursor: pointer;
+  transition: color 0.15s ease, background 0.15s ease;
+}
+
+.dash-panel-title:hover {
+  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.dash-panel-title:focus-visible {
+  outline: 1px solid var(--accent-blue-bright);
+  outline-offset: -2px;
+}
+
+/* Caret points down when the panel is open, sideways when collapsed: the
+   standard disclosure cue, and the resting hint that the title is a control. */
+.dash-panel-caret {
+  display: inline-flex;
+  flex-shrink: 0;
+  color: var(--text-faint);
+  transition: transform 0.18s ease, color 0.15s ease;
+}
+
+.dash-panel-title:hover .dash-panel-caret {
+  color: var(--text-muted);
+}
+
+[aria-expanded='false'] .dash-panel-caret {
+  transform: rotate(-90deg);
+}
+
+.dash-panel-title-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* Left accent bar - color set per panel via --panel-accent */
@@ -2520,4 +2584,315 @@ button.intel-technique-head-link:hover .intel-technique-name {
 .incident-row-meta {
   font-size: 11px;
   color: var(--text-muted);
+}
+
+/* ─── Section resize handles ──────────────────────────────────────────── */
+
+/* Thin drag zones sitting over the gutters between panels. Each one carries a
+   resting grip that brightens on hover and flips the cursor to the matching
+   resize arrow, so an edge announces it can be dragged without any label. */
+.resize-handle {
+  position: absolute;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  touch-action: none;
+}
+
+/* Vertical gutters: full-height strips on the graph's left and right edges,
+   centered on the 8px gap. */
+.resize-handle-col-left,
+.resize-handle-col-right {
+  top: 0;
+  bottom: 0;
+  width: 12px;
+  cursor: col-resize;
+}
+
+.resize-handle-col-left {
+  left: -10px;
+}
+
+.resize-handle-col-right {
+  right: -10px;
+}
+
+/* Horizontal gutter: a full-width strip on the top row's bottom edge, centered
+   on the gap above the detail panel. */
+.resize-handle-row {
+  left: 0;
+  right: 0;
+  bottom: -10px;
+  height: 12px;
+  cursor: row-resize;
+}
+
+/* Corners: small squares where a vertical gutter meets the horizontal one.
+   Raised above the strips so the corner wins when the pointer is in its zone,
+   the same priority a window gives its corners. */
+.resize-handle-corner {
+  width: 18px;
+  height: 18px;
+  bottom: -10px;
+  z-index: 7;
+}
+
+.resize-handle-corner-l {
+  left: -10px;
+  cursor: nesw-resize;
+}
+
+.resize-handle-corner-r {
+  right: -10px;
+  cursor: nwse-resize;
+}
+
+/* The resting grip: faint enough to stay quiet, present enough to read as a
+   handle. Hover and active states brighten it to the blue accent. */
+.resize-grip {
+  pointer-events: none;
+  opacity: 0.4;
+  transition: opacity 0.15s ease, background 0.15s ease;
+}
+
+.resize-handle:hover .resize-grip,
+.resize-handle:active .resize-grip {
+  opacity: 1;
+}
+
+.resize-handle-col-left .resize-grip,
+.resize-handle-col-right .resize-grip {
+  width: 4px;
+  height: 30px;
+  border-radius: 4px;
+  background: repeating-linear-gradient(
+    to bottom,
+    var(--text-muted) 0 2px,
+    transparent 2px 6px
+  );
+}
+
+.resize-handle-col-left:hover .resize-grip,
+.resize-handle-col-right:hover .resize-grip {
+  background: repeating-linear-gradient(
+    to bottom,
+    var(--accent-blue-bright) 0 2px,
+    transparent 2px 6px
+  );
+}
+
+.resize-handle-row .resize-grip {
+  width: 30px;
+  height: 4px;
+  border-radius: 4px;
+  background: repeating-linear-gradient(
+    to right,
+    var(--text-muted) 0 2px,
+    transparent 2px 6px
+  );
+}
+
+.resize-handle-row:hover .resize-grip {
+  background: repeating-linear-gradient(
+    to right,
+    var(--accent-blue-bright) 0 2px,
+    transparent 2px 6px
+  );
+}
+
+/* Corner grip: a few diagonal ticks, the universal "drag me" texture. */
+.resize-handle-corner .resize-grip {
+  width: 11px;
+  height: 11px;
+  background: repeating-linear-gradient(
+    var(--grip-diag, 45deg),
+    transparent 0 2px,
+    var(--text-muted) 2px 3px
+  );
+}
+
+.resize-handle-corner-l .resize-grip {
+  --grip-diag: -45deg;
+}
+
+.resize-handle-corner-r .resize-grip {
+  --grip-diag: 45deg;
+}
+
+.resize-handle-corner:hover .resize-grip {
+  background: repeating-linear-gradient(
+    var(--grip-diag, 45deg),
+    transparent 0 2px,
+    var(--accent-blue-bright) 2px 3px
+  );
+}
+
+/* A faint accent line tracing the gutter on hover, so the boundary the drag
+   will move is unmistakable. */
+.resize-handle-col-left::before,
+.resize-handle-col-right::before,
+.resize-handle-row::before {
+  content: '';
+  position: absolute;
+  background: var(--accent-blue-bright);
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+.resize-handle-col-left::before,
+.resize-handle-col-right::before {
+  top: 8px;
+  bottom: 8px;
+  left: 50%;
+  width: 2px;
+  transform: translateX(-50%);
+}
+
+.resize-handle-row::before {
+  left: 8px;
+  right: 8px;
+  top: 50%;
+  height: 2px;
+  transform: translateY(-50%);
+}
+
+.resize-handle-col-left:hover::before,
+.resize-handle-col-right:hover::before,
+.resize-handle-row:hover::before {
+  opacity: 0.35;
+}
+
+/* ─── Collapsed panels ────────────────────────────────────────────────── */
+
+/* A collapsed column folds to a thin rail: body hidden, title turned to read
+   vertically so the section is still labelled and re-openable with one click. */
+.dash-panel-collapsed .dash-panel-body {
+  display: none;
+}
+
+.dash-panel-collapsed .dash-panel-title {
+  writing-mode: vertical-rl;
+  height: 100%;
+  width: 100%;
+  padding: 12px 0;
+  justify-content: flex-start;
+  align-items: center;
+  border-bottom: none;
+  gap: 10px;
+}
+
+/* In the vertical rail the caret reads cleanest pointing along the rail, so
+   override the sideways collapsed rotation here. */
+.dash-panel-collapsed .dash-panel-caret {
+  transform: none;
+}
+
+/* The detail panel collapses the other way: down to just its tab bar. The
+   'auto' row track then shrinks the section to the header's height. */
+.detail-tabs-collapsed .detail-tabs-body {
+  display: none;
+}
+
+/* Disclosure toggle living at the right end of the detail tab bar. */
+.detail-tabs-toggle {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 14px;
+  background: transparent;
+  border: none;
+  border-left: 1px solid var(--border-subtle);
+  color: var(--text-faint);
+  cursor: pointer;
+  transition: color 0.15s ease, background 0.15s ease;
+}
+
+.detail-tabs-toggle:hover {
+  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.detail-tabs-toggle:focus-visible {
+  outline: 1px solid var(--accent-blue-bright);
+  outline-offset: -2px;
+}
+
+/* The detail drawer opens downward, so its caret reads up (expand) / down
+   (collapse) rather than the sideways column cue. */
+.detail-tabs-toggle .dash-panel-caret {
+  transform: rotate(0deg);
+}
+
+.detail-tabs-toggle[aria-expanded='false'] .dash-panel-caret {
+  transform: rotate(180deg);
+}
+
+/* ─── Drag reset hint ─────────────────────────────────────────────────── */
+
+/* Floating tag that follows the pointer during a drag, surfacing the
+   double-click-to-reset affordance only while the user is actually resizing. */
+.dash-resize-hint {
+  position: fixed;
+  left: 0;
+  top: 0;
+  z-index: 9999;
+  transform: translate(14px, 16px);
+  padding: 4px 9px;
+  font-family: var(--font-display);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-primary);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-left: 2px solid var(--accent-blue-bright);
+  border-radius: var(--radius);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.6);
+  pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+}
+
+.dash-resize-hint-active {
+  opacity: 1;
+  visibility: visible;
+}
+
+/* While a drag is live, lock the resize cursor across the whole page and stop
+   text selection so the pointer reads as one continuous resize gesture. */
+body.dash-resizing {
+  user-select: none;
+}
+
+body.dash-resizing-col,
+body.dash-resizing-col * {
+  cursor: col-resize !important;
+}
+
+body.dash-resizing-row,
+body.dash-resizing-row * {
+  cursor: row-resize !important;
+}
+
+body.dash-resizing-nesw,
+body.dash-resizing-nesw * {
+  cursor: nesw-resize !important;
+}
+
+body.dash-resizing-nwse,
+body.dash-resizing-nwse * {
+  cursor: nwse-resize !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dash-panel-title,
+  .dash-panel-caret,
+  .resize-grip,
+  .resize-handle::before,
+  .detail-tabs-toggle {
+    transition: none;
+  }
 }

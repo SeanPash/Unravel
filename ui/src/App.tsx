@@ -11,6 +11,8 @@ import { IncidentList } from './IncidentList'
 import { selectRelatedLogs } from './logFilter'
 import { buildNodeContext } from './nodeContext'
 import { displayRange, buildPhases } from './timeline'
+import { useDashboardLayout } from './useDashboardLayout'
+import { PanelTitle, ResizeHandle } from './DashboardChrome'
 import './App.css'
 
 const WS_URL = (import.meta.env.VITE_WS_URL as string | undefined) ?? `ws://${window.location.host}/ws`
@@ -262,6 +264,7 @@ export function reducer(state: AppState, action: Action): AppState {
 export default function App() {
   const [state, dispatch] = useReducer(reducer, initialState)
   const socketRef = useRef<EngineSocket | null>(null)
+  const layout = useDashboardLayout()
 
   useEffect(() => {
     const sock = new EngineSocket(WS_URL, {
@@ -388,10 +391,23 @@ export default function App() {
         </div>
         <StatusBadge status={state.status} />
       </header>
-      <main className="app-main">
-        <div className="app-main-row">
-          <aside className="dash-panel incident-pane">
-            <div className="dash-panel-title">Incidents</div>
+      <main
+        className="app-main"
+        ref={layout.mainRef}
+        style={{ gridTemplateRows: layout.rowTemplateValue }}
+      >
+        <div
+          className="app-main-row"
+          ref={layout.rowGridRef}
+          style={{ gridTemplateColumns: layout.colTemplate }}
+        >
+          <div className="dash-cell" ref={layout.registerCell(0)}>
+          <aside className={`dash-panel incident-pane${layout.collapsed.incidents ? ' dash-panel-collapsed' : ''}`}>
+            <PanelTitle
+              label="Incidents"
+              collapsed={layout.collapsed.incidents}
+              onToggle={() => layout.toggleCollapse('incidents')}
+            />
             <div className="dash-panel-body">
               <IncidentList
                 incidents={incidents}
@@ -400,8 +416,14 @@ export default function App() {
               />
             </div>
           </aside>
-          <section className="dash-panel graph-pane">
-            <div className="dash-panel-title">Provenance Graph</div>
+          </div>
+          <div className="dash-cell" ref={layout.registerCell(1)}>
+          <section className={`dash-panel graph-pane${layout.collapsed.graph ? ' dash-panel-collapsed' : ''}`}>
+            <PanelTitle
+              label="Provenance Graph"
+              collapsed={layout.collapsed.graph}
+              onToggle={() => layout.toggleCollapse('graph')}
+            />
             <div className="dash-panel-body">
               <GraphView
                 nodes={nodes}
@@ -450,8 +472,42 @@ export default function App() {
               )}
             </div>
           </section>
-          <aside className="dash-panel narration-pane">
-            <div className="dash-panel-title">Attack Phases</div>
+            {layout.canResize.gutter0 && (
+              <ResizeHandle
+                variant="col-left"
+                label="Resize the incidents and graph columns"
+                handle={layout.colHandle(0)}
+              />
+            )}
+            {layout.canResize.gutter1 && (
+              <ResizeHandle
+                variant="col-right"
+                label="Resize the graph and attack-phases columns"
+                handle={layout.colHandle(1)}
+              />
+            )}
+            {layout.canResize.corner0 && (
+              <ResizeHandle
+                variant="corner-l"
+                label="Resize the graph from its lower-left corner"
+                handle={layout.cornerHandle(0)}
+              />
+            )}
+            {layout.canResize.corner1 && (
+              <ResizeHandle
+                variant="corner-r"
+                label="Resize the graph from its lower-right corner"
+                handle={layout.cornerHandle(1)}
+              />
+            )}
+          </div>
+          <div className="dash-cell" ref={layout.registerCell(2)}>
+          <aside className={`dash-panel narration-pane${layout.collapsed.narration ? ' dash-panel-collapsed' : ''}`}>
+            <PanelTitle
+              label="Attack Phases"
+              collapsed={layout.collapsed.narration}
+              onToggle={() => layout.toggleCollapse('narration')}
+            />
             <div className="dash-panel-body narration-pane-body">
               <PhasePanel
                 phases={attackPhases}
@@ -463,27 +519,42 @@ export default function App() {
               />
             </div>
           </aside>
+          </div>
+          {layout.canResize.row && (
+            <ResizeHandle
+              variant="row"
+              label="Resize the graph row and the detail panel"
+              handle={layout.rowHandle()}
+            />
+          )}
         </div>
-        <DetailTabs
-          activeTab={state.activeTab}
-          onTabChange={(tab) => dispatch({ type: 'set_tab', payload: tab })}
-          logs={relatedLogs}
-          phases={phases}
-          onLogSelect={(log) => dispatch({ type: 'jump_to_ts', payload: log.ts })}
-          focusedLabel={focusedLabel}
-          hasChain={activeChain !== null}
-          onClearFocus={() => dispatch({ type: 'focus_node', payload: null })}
-          chain={activeChain}
-          edges={edges}
-          intel={active?.threatIntel ?? null}
-          awaitingIntel={active?.awaitingIntel ?? false}
-          activity={active?.activity ?? []}
-          agentsBusy={(active?.awaitingNarration ?? false) || (active?.awaitingIntel ?? false)}
-          onNodeFocus={(id) => dispatch({ type: 'focus_node', payload: id })}
-          onTechniqueSelect={handleTechniqueSelect}
-          activeTechniqueId={activeTechnique?.techniqueId ?? null}
-          chainTechniqueIds={techniqueFoci.map((t) => t.techniqueId)}
-        />
+        <div className="dash-cell detail-cell" ref={layout.detailRef}>
+          <DetailTabs
+            activeTab={state.activeTab}
+            onTabChange={(tab) => dispatch({ type: 'set_tab', payload: tab })}
+            logs={relatedLogs}
+            phases={phases}
+            onLogSelect={(log) => dispatch({ type: 'jump_to_ts', payload: log.ts })}
+            focusedLabel={focusedLabel}
+            hasChain={activeChain !== null}
+            onClearFocus={() => dispatch({ type: 'focus_node', payload: null })}
+            chain={activeChain}
+            edges={edges}
+            intel={active?.threatIntel ?? null}
+            awaitingIntel={active?.awaitingIntel ?? false}
+            activity={active?.activity ?? []}
+            agentsBusy={(active?.awaitingNarration ?? false) || (active?.awaitingIntel ?? false)}
+            onNodeFocus={(id) => dispatch({ type: 'focus_node', payload: id })}
+            onTechniqueSelect={handleTechniqueSelect}
+            activeTechniqueId={activeTechnique?.techniqueId ?? null}
+            chainTechniqueIds={techniqueFoci.map((t) => t.techniqueId)}
+            collapsed={layout.collapsed.detail}
+            onToggleCollapse={() => layout.toggleCollapse('detail')}
+          />
+        </div>
+        <div className="dash-resize-hint" ref={layout.hintRef} aria-hidden="true">
+          Double-click to reset
+        </div>
       </main>
     </div>
   )
