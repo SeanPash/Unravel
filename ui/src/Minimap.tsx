@@ -8,6 +8,9 @@ import { useEffect, useRef } from 'react'
 import { minimapTransform, toMini, fromMini } from './incidentMap'
 import type { Rect } from './incidentMap'
 
+// Reference size. The host scales the minimap with the graph panel and passes
+// the live width/height in; these are the fallback when it does not (and the
+// values the unit tests assume).
 const MINIMAP_W = 192
 const MINIMAP_H = 128
 const MINIMAP_PAD = 12
@@ -30,6 +33,9 @@ export interface MinimapData {
 
 export interface MinimapProps {
   data: MinimapData
+  // Rendered size in px. Omitted in tests, where the reference size applies.
+  width?: number
+  height?: number
   onSectionClick: (incidentId: string) => void
   onJump: (worldX: number, worldY: number) => void
   // Scrub navigation: fired for every drag move (button held) over the
@@ -43,8 +49,11 @@ export interface MinimapProps {
 
 const center = (r: Rect) => ({ x: (r.x1 + r.x2) / 2, y: (r.y1 + r.y2) / 2 })
 
-export function Minimap({ data, onSectionClick, onJump, onHover, onHoverEnd, onHoverIncident }: MinimapProps) {
-  const t = minimapTransform(data.world, MINIMAP_W, MINIMAP_H, MINIMAP_PAD)
+export function Minimap({ data, width = MINIMAP_W, height = MINIMAP_H, onSectionClick, onJump, onHover, onHoverEnd, onHoverIncident }: MinimapProps) {
+  // Keep the inner padding proportional to the box so it does not swallow a
+  // small minimap or look stranded on a large one.
+  const pad = Math.max(6, Math.round(width * (MINIMAP_PAD / MINIMAP_W)))
+  const t = minimapTransform(data.world, width, height, pad)
   const sectionById = new Map(data.sections.map((s) => [s.id, s]))
 
   // Whether the button is held over the minimap, and whether a drag actually
@@ -116,12 +125,12 @@ export function Minimap({ data, onSectionClick, onJump, onHover, onHoverEnd, onH
   // Outside-viewport scrim: one evenodd path covering the map with the
   // camera's window cut out, so "where you are" reads as a bright opening
   // in a dim field, the way every canvas minimap signals it.
-  const vx = Math.max(0, Math.min(viewport.x, MINIMAP_W))
-  const vy = Math.max(0, Math.min(viewport.y, MINIMAP_H))
-  const vx2 = Math.max(0, Math.min(viewport.x + viewport.width, MINIMAP_W))
-  const vy2 = Math.max(0, Math.min(viewport.y + viewport.height, MINIMAP_H))
+  const vx = Math.max(0, Math.min(viewport.x, width))
+  const vy = Math.max(0, Math.min(viewport.y, height))
+  const vx2 = Math.max(0, Math.min(viewport.x + viewport.width, width))
+  const vy2 = Math.max(0, Math.min(viewport.y + viewport.height, height))
   const scrimPath =
-    `M0 0H${MINIMAP_W}V${MINIMAP_H}H0Z ` +
+    `M0 0H${width}V${height}H0Z ` +
     `M${vx} ${vy}H${vx2}V${vy2}H${vx}Z`
 
   return (
@@ -136,9 +145,9 @@ export function Minimap({ data, onSectionClick, onJump, onHover, onHoverEnd, onH
       </div>
       <svg
         className="minimap-canvas"
-        width={MINIMAP_W}
-        height={MINIMAP_H}
-        viewBox={`0 0 ${MINIMAP_W} ${MINIMAP_H}`}
+        width={width}
+        height={height}
+        viewBox={`0 0 ${width} ${height}`}
         onMouseDown={handleMouseDown}
         onClick={handleBackgroundClick}
         onMouseMove={handleMouseMove}
@@ -148,7 +157,7 @@ export function Minimap({ data, onSectionClick, onJump, onHover, onHoverEnd, onH
             <circle cx="1" cy="1" r="0.5" className="minimap-grid-dot" />
           </pattern>
         </defs>
-        <rect className="minimap-terrain" width={MINIMAP_W} height={MINIMAP_H} fill="url(#minimap-grid)" />
+        <rect className="minimap-terrain" width={width} height={height} fill="url(#minimap-grid)" />
         {data.related.map(([a, b]) => {
           const sa = sectionById.get(a)
           const sb = sectionById.get(b)

@@ -8,10 +8,12 @@ import {
   columnTemplate,
   pairToRatios,
   rowTemplate,
+  sectionResetAxes,
   type CollapseState,
+  type PanelKey,
 } from './dashboardLayout'
 
-export type PanelKey = keyof CollapseState
+export type { PanelKey }
 
 // Which gutter a drag is acting on. A corner drives a column gutter and the row
 // gutter at once, which is what gives it the window-corner feel.
@@ -37,6 +39,9 @@ function positionHint(hint: HTMLElement, x: number, y: number): void {
 export interface HandleProps {
   onPointerDown: (e: React.PointerEvent) => void
   onDoubleClick: () => void
+  onPointerEnter: (e: React.PointerEvent) => void
+  onPointerMove: (e: React.PointerEvent) => void
+  onPointerLeave: () => void
 }
 
 /**
@@ -66,6 +71,9 @@ export function useDashboardLayout() {
   const cellRefs = useRef<(HTMLDivElement | null)[]>([null, null, null])
   const detailRef = useRef<HTMLDivElement | null>(null)
   const hintRef = useRef<HTMLDivElement | null>(null)
+  // True for the duration of a drag, so the hover-hint handlers leave the hint
+  // alone while the drag engine owns it.
+  const draggingRef = useRef(false)
 
   const registerCell = useCallback(
     (index: number) => (el: HTMLDivElement | null) => {
@@ -81,6 +89,7 @@ export function useDashboardLayout() {
   const beginDrag = useCallback(
     (kind: DragKind, e: React.PointerEvent) => {
       e.preventDefault()
+      draggingRef.current = true
       const startX = e.clientX
       const startY = e.clientY
       const wantsCol = kind.type === 'col' || kind.type === 'corner'
@@ -152,6 +161,7 @@ export function useDashboardLayout() {
         window.removeEventListener('pointerup', up)
         document.body.classList.remove('dash-resizing', `dash-resizing-${cursor}`)
         if (hint) hint.classList.remove('dash-resize-hint-active')
+        draggingRef.current = false
         if (colStart) setColRatios(liveCol)
         if (rowStart) setRowRatios(liveRow)
       }
@@ -167,19 +177,67 @@ export function useDashboardLayout() {
   const resetCols = useCallback(() => setColRatios([...DEFAULT_COL_RATIOS]), [])
   const resetRows = useCallback(() => setRowRatios([...DEFAULT_ROW_RATIOS]), [])
 
+  // Snap every section back to its reference size at once: both grid dimensions
+  // plus any collapsed rails reopened. Drives the app-bar "Reset grids" button.
+  const resetAll = useCallback(() => {
+    setColRatios([...DEFAULT_COL_RATIOS])
+    setRowRatios([...DEFAULT_ROW_RATIOS])
+    setCollapsed({ incidents: false, graph: false, narration: false, detail: false })
+  }, [])
+
+  // Double-clicking a section's body resets the dimensions that govern its
+  // size, mirroring the gutter/corner double-clicks. Every top-row panel
+  // (incidents, graph, narration) resets both axes because its height tracks
+  // the shared top-row split and its width tracks the column split; the
+  // full-width detail row resets the row split alone.
+  const resetSection = useCallback(
+    (key: PanelKey) => {
+      const axes = sectionResetAxes(key)
+      if (axes.cols) resetCols()
+      if (axes.rows) resetRows()
+    },
+    [resetCols, resetRows],
+  )
+
+  // Show the "double-click to reset" hint while the pointer rests on a resize
+  // handle, so the affordance is discoverable before a drag starts. The drag
+  // engine owns the hint mid-drag, so these no-op while dragging.
+  const hintHover = useMemo(
+    () => ({
+      onPointerEnter: (e: React.PointerEvent) => {
+        if (draggingRef.current) return
+        const hint = hintRef.current
+        if (!hint) return
+        hint.classList.add('dash-resize-hint-active')
+        positionHint(hint, e.clientX, e.clientY)
+      },
+      onPointerMove: (e: React.PointerEvent) => {
+        if (draggingRef.current) return
+        if (hintRef.current) positionHint(hintRef.current, e.clientX, e.clientY)
+      },
+      onPointerLeave: () => {
+        if (draggingRef.current) return
+        hintRef.current?.classList.remove('dash-resize-hint-active')
+      },
+    }),
+    [],
+  )
+
   const colHandle = useCallback(
     (gutter: 0 | 1): HandleProps => ({
       onPointerDown: (e) => beginDrag({ type: 'col', gutter }, e),
       onDoubleClick: resetCols,
+      ...hintHover,
     }),
-    [beginDrag, resetCols],
+    [beginDrag, resetCols, hintHover],
   )
   const rowHandle = useCallback(
     (): HandleProps => ({
       onPointerDown: (e) => beginDrag({ type: 'row' }, e),
       onDoubleClick: resetRows,
+      ...hintHover,
     }),
-    [beginDrag, resetRows],
+    [beginDrag, resetRows, hintHover],
   )
   const cornerHandle = useCallback(
     (gutter: 0 | 1): HandleProps => ({
@@ -188,8 +246,9 @@ export function useDashboardLayout() {
         resetCols()
         resetRows()
       },
+      ...hintHover,
     }),
-    [beginDrag, resetCols, resetRows],
+    [beginDrag, resetCols, resetRows, hintHover],
   )
 
   // A gutter only exists between two live panels: if either neighbour is a
@@ -216,6 +275,10 @@ export function useDashboardLayout() {
     // Collapse.
     collapsed,
     toggleCollapse,
+    // Snap everything back to the reference layout.
+    resetAll,
+    // Reset just the dimensions that size one section (double-click its body).
+    resetSection,
     // Handle wiring.
     colHandle,
     rowHandle,
