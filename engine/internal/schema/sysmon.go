@@ -16,10 +16,7 @@ var ErrUnsupportedEvent = errors.New("unsupported sysmon event id")
 // EventID/EventCode field. Returns the typed event as any so the caller can
 // type-switch.
 func ParseSysmon(raw map[string]any) (any, error) {
-	eid := asString(raw, "EventID")
-	if eid == "" {
-		eid = asString(raw, "EventCode")
-	}
+	eid := firstField(raw, "EventID", "EventCode", "event_id", "signature_id")
 	switch eid {
 	case "1":
 		return ParseProcessCreate(raw)
@@ -41,7 +38,7 @@ func ParseProcessCreate(raw map[string]any) (types.ProcessCreate, error) {
 	if err != nil {
 		return types.ProcessCreate{}, err
 	}
-	pid, err := asInt(raw, "ProcessId")
+	pid, err := firstInt(raw, "ProcessId", "process_id", "pid")
 	if err != nil {
 		return types.ProcessCreate{}, fmt.Errorf("ProcessCreate: %w", err)
 	}
@@ -50,11 +47,11 @@ func ParseProcessCreate(raw map[string]any) (types.ProcessCreate, error) {
 		TS:          ts,
 		Host:        hostFrom(raw),
 		PID:         pid,
-		Image:       asString(raw, "Image"),
-		ParentPID:   asIntOpt(raw, "ParentProcessId"),
-		ParentImage: asString(raw, "ParentImage"),
-		CommandLine: asString(raw, "CommandLine"),
-		User:        asString(raw, "User"),
+		Image:       firstField(raw, "Image", "process", "process_path", "Process_Name", "process_exec"),
+		ParentPID:   firstIntOpt(raw, "ParentProcessId", "parent_process_id", "ppid"),
+		ParentImage: firstField(raw, "ParentImage", "parent_process", "parent_process_path", "parent_process_name"),
+		CommandLine: firstField(raw, "CommandLine", "process_command_line", "Process_Command_Line", "process"),
+		User:        firstField(raw, "User", "user", "Account_Name", "src_user"),
 	}, nil
 }
 
@@ -63,11 +60,11 @@ func ParseNetworkConnect(raw map[string]any) (types.NetworkConnect, error) {
 	if err != nil {
 		return types.NetworkConnect{}, err
 	}
-	pid, err := asInt(raw, "ProcessId")
+	pid, err := firstInt(raw, "ProcessId", "process_id", "pid")
 	if err != nil {
 		return types.NetworkConnect{}, fmt.Errorf("NetworkConnect: %w", err)
 	}
-	dport, err := asInt(raw, "DestinationPort")
+	dport, err := firstInt(raw, "DestinationPort", "dest_port", "dport")
 	if err != nil {
 		return types.NetworkConnect{}, fmt.Errorf("NetworkConnect: %w", err)
 	}
@@ -76,10 +73,10 @@ func ParseNetworkConnect(raw map[string]any) (types.NetworkConnect, error) {
 		TS:       ts,
 		Host:     hostFrom(raw),
 		PID:      pid,
-		Image:    asString(raw, "Image"),
-		DstIP:    asString(raw, "DestinationIp"),
+		Image:    firstField(raw, "Image", "process", "process_path", "Process_Name"),
+		DstIP:    firstField(raw, "DestinationIp", "dest_ip", "dest"),
 		DstPort:  dport,
-		Protocol: asString(raw, "Protocol"),
+		Protocol: firstField(raw, "Protocol", "transport", "protocol"),
 	}, nil
 }
 
@@ -88,11 +85,11 @@ func ParseProcessAccess(raw map[string]any) (types.ProcessAccess, error) {
 	if err != nil {
 		return types.ProcessAccess{}, err
 	}
-	srcPID, err := asInt(raw, "SourceProcessId")
+	srcPID, err := firstInt(raw, "SourceProcessId", "source_process_id")
 	if err != nil {
 		return types.ProcessAccess{}, fmt.Errorf("ProcessAccess: %w", err)
 	}
-	tgtPID, err := asInt(raw, "TargetProcessId")
+	tgtPID, err := firstInt(raw, "TargetProcessId", "dest_process_id")
 	if err != nil {
 		return types.ProcessAccess{}, fmt.Errorf("ProcessAccess: %w", err)
 	}
@@ -101,13 +98,13 @@ func ParseProcessAccess(raw map[string]any) (types.ProcessAccess, error) {
 		TS:            ts,
 		Host:          hostFrom(raw),
 		SourcePID:     srcPID,
-		SourceImage:   asString(raw, "SourceImage"),
-		SourceUser:    asString(raw, "SourceUser"),
+		SourceImage:   firstField(raw, "SourceImage", "process", "process_path"),
+		SourceUser:    firstField(raw, "SourceUser", "user"),
 		TargetPID:     tgtPID,
-		TargetImage:   asString(raw, "TargetImage"),
-		TargetUser:    asString(raw, "TargetUser"),
-		GrantedAccess: asString(raw, "GrantedAccess"),
-		CallTrace:     asString(raw, "CallTrace"),
+		TargetImage:   firstField(raw, "TargetImage", "dest_process"),
+		TargetUser:    firstField(raw, "TargetUser"),
+		GrantedAccess: firstField(raw, "GrantedAccess"),
+		CallTrace:     firstField(raw, "CallTrace"),
 	}, nil
 }
 
@@ -120,7 +117,7 @@ func ParseFileCreate(raw map[string]any) (types.FileCreate, error) {
 			return types.FileCreate{}, err
 		}
 	}
-	pid, err := asInt(raw, "ProcessId")
+	pid, err := firstInt(raw, "ProcessId", "process_id", "pid")
 	if err != nil {
 		return types.FileCreate{}, fmt.Errorf("FileCreate: %w", err)
 	}
@@ -129,8 +126,8 @@ func ParseFileCreate(raw map[string]any) (types.FileCreate, error) {
 		TS:             ts,
 		Host:           hostFrom(raw),
 		PID:            pid,
-		Image:          asString(raw, "Image"),
-		User:           asString(raw, "User"),
-		TargetFilename: asString(raw, "TargetFilename"),
+		Image:          firstField(raw, "Image", "process", "process_path"),
+		User:           firstField(raw, "User", "user"),
+		TargetFilename: firstField(raw, "TargetFilename", "file_path", "file_name"),
 	}, nil
 }

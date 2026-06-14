@@ -8,3 +8,5 @@ docs/superpowers/
 *.crt
 *.p12
 *_token*
+node_modules/
+*.exe

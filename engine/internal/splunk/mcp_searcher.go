@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 	"sync"
@@ -13,12 +14,23 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// runQueryTool is the Splunk MCP Server tool that executes SPL and returns rows.
-const runQueryTool = "splunk_run_query"
+// defaultRunQueryTool is the Splunk MCP Server tool that executes SPL and
+// returns rows. It is the default; the actual name is resolved from tools/list
+// on session connect when possible.
+const defaultRunQueryTool = "splunk_run_query"
 
-// generateSPLTool is the Splunk MCP Server's AI Assistant tool that turns a
-// natural-language question into SPL.
-const generateSPLTool = "saia_generate_spl"
+// defaultGenerateSPLTool is the Splunk MCP Server's AI Assistant tool that
+// turns a natural-language question into SPL. Resolved from tools/list when
+// possible.
+const defaultGenerateSPLTool = "saia_generate_spl"
+
+// runQueryAliases / generateSPLAliases are alternative tool names the resolver
+// accepts when the exact default is absent, so a server that renamed the tools
+// still works without a code change. Matching is case-insensitive substring.
+var (
+	runQueryAliases    = []string{"run_query", "run_spl", "search", "splunk_search"}
+	generateSPLAliases = []string{"generate_spl", "nl_to_spl", "saia"}
+)
 
 // saiaTextField is the input key saia_generate_spl reads the natural-language
 // question from. Confirm against the live server's tools/list before the
@@ -36,35 +48,48 @@ const saiaTextField = "text"
 type MCPSearcher struct {
 	transport mcp.Transport
 	client    *mcp.Client
+	logger    *slog.Logger
 
 	mu      sync.Mutex
 	session *mcp.ClientSession
+	// runQueryTool / generateSPLTool hold the resolved tool names, seeded with
+	// the defaults and overwritten by resolveTools after a successful connect.
+	runQueryTool    string
+	generateSPLTool string
 }
 
 // NewMCPSearcher targets the Splunk MCP Server at endpoint, authenticating with
 // the per-app encrypted bearer token. insecure skips TLS verification (GOAD
-// self-signed certs), matching RESTSearcher.
-func NewMCPSearcher(endpoint, token string, insecure bool) *MCPSearcher {
+// self-signed certs), matching RESTSearcher. tlsCfg, when non-nil, supplies a
+// RootCAs pool for a corporate private CA.
+func NewMCPSearcher(endpoint, token string, insecure bool, tlsCfg *tls.Config, logger *slog.Logger) *MCPSearcher {
 	httpClient := &http.Client{
 		Timeout: 30 * time.Second,
 		Transport: &bearerRoundTripper{
 			token: token,
 			base: &http.Transport{
-				TLSClientConfig: &tls.Config{InsecureSkipVerify: insecure}, //nolint:gosec
+				TLSClientConfig: buildTLSConfig(tlsCfg, insecure),
 			},
 		},
 	}
-	return newMCPSearcher(&mcp.StreamableClientTransport{
+	s := newMCPSearcher(&mcp.StreamableClientTransport{
 		Endpoint:   endpoint,
 		HTTPClient: httpClient,
 	})
+	if logger != nil {
+		s.logger = logger
+	}
+	return s
 }
 
 // newMCPSearcher is the shared constructor. Tests inject an in-memory transport.
 func newMCPSearcher(t mcp.Transport) *MCPSearcher {
 	return &MCPSearcher{
-		transport: t,
-		client:    mcp.NewClient(&mcp.Implementation{Name: "unravel-engine", Version: "1.0"}, nil),
+		transport:       t,
+		client:          mcp.NewClient(&mcp.Implementation{Name: "unravel-engine", Version: "1.0"}, nil),
+		logger:          slog.Default(),
+		runQueryTool:    defaultRunQueryTool,
+		generateSPLTool: defaultGenerateSPLTool,
 	}
 }
 
@@ -158,7 +183,59 @@ func (m *MCPSearcher) ensureSession(ctx context.Context) (*mcp.ClientSession, er
 		return nil, fmt.Errorf("mcp connect: %w", err)
 	}
 	m.session = sess
+	m.resolveTools(ctx, sess)
 	return sess, nil
+}
+
+// resolveTools calls tools/list and rewrites runQueryTool/generateSPLTool to
+// the server's actual names. It degrades gracefully: on any failure it logs and
+// keeps the defaults, so a server that does not implement tools/list still
+// works. Called under m.mu.
+func (m *MCPSearcher) resolveTools(ctx context.Context, sess *mcp.ClientSession) {
+	res, err := sess.ListTools(ctx, &mcp.ListToolsParams{})
+	if err != nil {
+		m.logger.Warn("mcp tools/list failed; using default tool names", "err", err,
+			"run_query", m.runQueryTool, "generate_spl", m.generateSPLTool)
+		return
+	}
+	names := make([]string, 0, len(res.Tools))
+	for _, t := range res.Tools {
+		if t != nil {
+			names = append(names, t.Name)
+		}
+	}
+	m.logger.Info("mcp tools/list resolved", "tools", names)
+
+	if name, ok := matchTool(names, defaultRunQueryTool, runQueryAliases); ok {
+		m.runQueryTool = name
+	} else {
+		m.logger.Warn("mcp run-query tool not found in tools/list; using default", "default", m.runQueryTool, "available", names)
+	}
+	if name, ok := matchTool(names, defaultGenerateSPLTool, generateSPLAliases); ok {
+		m.generateSPLTool = name
+	} else {
+		m.logger.Warn("mcp generate-spl tool not found in tools/list; using default", "default", m.generateSPLTool, "available", names)
+	}
+}
+
+// matchTool returns the first name that equals exact, else the first that
+// contains any alias (case-insensitive). The bool reports whether a match was
+// found.
+func matchTool(names []string, exact string, aliases []string) (string, bool) {
+	for _, n := range names {
+		if n == exact {
+			return n, true
+		}
+	}
+	for _, n := range names {
+		low := strings.ToLower(n)
+		for _, a := range aliases {
+			if strings.Contains(low, a) {
+				return n, true
+			}
+		}
+	}
+	return "", false
 }
 
 // Search runs query through the Splunk MCP Server's splunk_run_query tool and
@@ -170,21 +247,22 @@ func (m *MCPSearcher) Search(ctx context.Context, query string) ([]map[string]an
 	if err != nil {
 		return nil, err
 	}
+	tool := m.runQueryTool
 	res, err := sess.CallTool(ctx, &mcp.CallToolParams{
-		Name:      runQueryTool,
+		Name:      tool,
 		Arguments: map[string]any{"query": query},
 	})
 	if err != nil {
 		// A failed call may mean the session's underlying connection is dead.
 		// Drop it so the next Search reconnects rather than failing forever.
 		m.dropSession(sess)
-		return nil, fmt.Errorf("mcp call %s: %w", runQueryTool, err)
+		return nil, fmt.Errorf("mcp call %s: %w", tool, err)
 	}
 	if res.IsError {
 		// A tool-level error (e.g. malformed SPL) is not a transport failure, so
 		// the session stays healthy; surface it as an error for graceful upstream
 		// degradation rather than parsing the error text as rows.
-		return nil, fmt.Errorf("mcp tool %s error: %s", runQueryTool, strings.TrimSpace(mcpText(res)))
+		return nil, fmt.Errorf("mcp tool %s error: %s", tool, strings.TrimSpace(mcpText(res)))
 	}
 	return parseMCPRows(res)
 }
@@ -201,16 +279,17 @@ func (m *MCPSearcher) GenerateSPL(ctx context.Context, question string) (string,
 	if err != nil {
 		return "", err
 	}
+	tool := m.generateSPLTool
 	res, err := sess.CallTool(ctx, &mcp.CallToolParams{
-		Name:      generateSPLTool,
+		Name:      tool,
 		Arguments: map[string]any{saiaTextField: question},
 	})
 	if err != nil {
 		m.dropSession(sess)
-		return "", fmt.Errorf("mcp call %s: %w", generateSPLTool, err)
+		return "", fmt.Errorf("mcp call %s: %w", tool, err)
 	}
 	if res.IsError {
-		return "", fmt.Errorf("mcp tool %s error: %s", generateSPLTool, strings.TrimSpace(mcpText(res)))
+		return "", fmt.Errorf("mcp tool %s error: %s", tool, strings.TrimSpace(mcpText(res)))
 	}
 	return extractGeneratedSPL(mcpText(res))
 }

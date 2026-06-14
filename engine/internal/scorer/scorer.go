@@ -89,6 +89,40 @@ func New(cfg Config) *Scorer {
 // pipeline if a consumer falls behind.
 func (s *Scorer) Signals() <-chan Signal { return s.signals }
 
+// PruneNodes drops all per-node state for the given node IDs. Call it in step
+// with graph eviction (e.g. from the graph's eviction callback) so the scorer's
+// node-keyed maps do not grow without bound in long-running streaming sessions.
+// The tuple-keyed frequency baselines (spawnCounts, authCounts) are deliberately
+// left intact: they model how common a (parent,child) image pair is across the
+// whole stream, not per-node state, so pruning them would discard learned rarity.
+// Additive and concurrency-safe: serializes on the scorer mutex.
+func (s *Scorer) PruneNodes(nodeIDs []string) {
+	if len(nodeIDs) == 0 {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, id := range nodeIDs {
+		delete(s.nodeLastTS, id)
+		delete(s.nodeIncident, id)
+	}
+}
+
+// PruneEdges drops all per-edge state for the given edge IDs. Call it in step
+// with graph eviction so the scorer's edge-keyed maps stay bounded. Additive and
+// concurrency-safe: serializes on the scorer mutex.
+func (s *Scorer) PruneEdges(edgeIDs []string) {
+	if len(edgeIDs) == 0 {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, id := range edgeIDs {
+		delete(s.edgeScores, id)
+		delete(s.authKinds, id)
+	}
+}
+
 // SetAuthKind tags an authentication edge with its protocol (e.g. "kerberos",
 // "ntlm") so the frequency-rarity term can use a role/kind tuple. The pipeline
 // calls this from the schema mapper before ScoreEdge.
@@ -243,6 +277,15 @@ func (s *Scorer) componentMean(start *types.Edge, g *graph.Graph) (float64, stri
 	seenEdges := make(map[string]bool)
 	queue := []string{start.Src, start.Dst}
 
+	// edgeTS / edgeDst capture each component edge's timestamp and destination
+	// during the BFS. All graph reads MUST happen here, while no scorer lock is
+	// held: the eviction callback runs under the graph write lock and then takes
+	// the scorer lock, so taking a graph lock while holding the scorer lock would
+	// invert that order and deadlock (ABBA). We therefore snapshot everything the
+	// locked aggregation needs up front and never touch the graph under s.mu.
+	edgeTS := make(map[string]int64)
+	edgeDst := make(map[string]string)
+
 	for len(queue) > 0 {
 		nid := queue[0]
 		queue = queue[1:]
@@ -253,12 +296,16 @@ func (s *Scorer) componentMean(start *types.Edge, g *graph.Graph) (float64, stri
 		for _, e := range g.OutEdges(nid) {
 			if !seenEdges[e.ID] {
 				seenEdges[e.ID] = true
+				edgeTS[e.ID] = e.TS
+				edgeDst[e.ID] = e.Dst
 				queue = append(queue, e.Dst)
 			}
 		}
 		for _, e := range g.InEdges(nid) {
 			if !seenEdges[e.ID] {
 				seenEdges[e.ID] = true
+				edgeTS[e.ID] = e.TS
+				edgeDst[e.ID] = e.Dst
 				queue = append(queue, e.Src)
 			}
 		}
@@ -283,11 +330,10 @@ func (s *Scorer) componentMean(start *types.Edge, g *graph.Graph) (float64, stri
 		// the suspicious chain (rather than its root) gives the full kill
 		// chain. The mean-vs-threshold check above already gates "is this
 		// component suspicious?"; the hot-edge selection just picks the right
-		// starting point for the backward walk.
-		ts := int64(0)
-		if e := g.Edge(eid); e != nil {
-			ts = e.TS
-		}
+		// starting point for the backward walk. Timestamps come from the BFS
+		// snapshot, not a fresh graph read, to keep the lock order graph-then-
+		// scorer everywhere (see the note above).
+		ts := edgeTS[eid]
 		if ts > hotTS || hotEdge == "" {
 			hotEdge = eid
 			hotTS = ts
@@ -298,8 +344,8 @@ func (s *Scorer) componentMean(start *types.Edge, g *graph.Graph) (float64, stri
 	}
 	hotNode := start.Dst
 	if hotEdge != "" {
-		if e := g.Edge(hotEdge); e != nil {
-			hotNode = e.Dst
+		if dst, ok := edgeDst[hotEdge]; ok {
+			hotNode = dst
 		}
 	}
 	return sum / float64(count), hotNode, incident
