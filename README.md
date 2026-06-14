@@ -141,12 +141,12 @@ When MCP enrichment is enabled, the narrator can also call `splunk_nl_search`: i
 
 The front end (React + Cytoscape.js, embedded in the engine binary) is built to make an investigation legible at a glance, not just pretty:
 
-- **Live provenance graph** — nodes colored by suspicion, edges appearing in real time as Splunk events arrive.
-- **Incident map + minimap** — when the engine separates activity into distinct incidents, each gets its own labeled region; the minimap shows the whole picture and lets you scrub and pan.
-- **Time scrubber** — play, pause, and step through the attack chronologically; clicking an event focuses its node in the graph.
-- **Attack phase cards** — one card per MITRE tactic, with the AI's summary, confidence, and technique IDs. Click one to drive the camera, timeline, and logs to that phase.
-- **Node inspector** — pinnable, draggable drawers explaining a node's role in the chain, its phases and techniques, and its parent/child relationships.
-- **Logs and threat-intel panels** — the raw Splunk events behind any node, and the enriched ATT&CK/CVE context for the chain.
+- **Live provenance graph** - nodes colored by suspicion, edges appearing in real time as Splunk events arrive.
+- **Incident map + minimap** - when the engine separates activity into distinct incidents, each gets its own labeled region; the minimap shows the whole picture and lets you scrub and pan.
+- **Time scrubber** - play, pause, and step through the attack chronologically; clicking an event focuses its node in the graph.
+- **Attack phase cards** - one card per MITRE tactic, with the AI's summary, confidence, and technique IDs. Click one to drive the camera, timeline, and logs to that phase.
+- **Node inspector** - pinnable, draggable drawers explaining a node's role in the chain, its phases and techniques, and its parent/child relationships.
+- **Logs and threat-intel panels** - the raw Splunk events behind any node, and the enriched ATT&CK/CVE context for the chain.
 
 ## Operating modes
 

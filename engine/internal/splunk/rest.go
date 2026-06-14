@@ -5,10 +5,13 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -22,7 +25,22 @@ type RESTConfig struct {
 	Search   string
 	Insecure bool
 
+	// Earliest and Latest bound the search window. Earliest defaults to "rt"
+	// (real-time tail) when empty so a live stream does not replay all history;
+	// pass a relative ("-15m") or absolute time to override. Latest is usually
+	// left empty (open-ended).
+	Earliest string
+	Latest   string
+
+	// TLSConfig, when set, is used verbatim for the transport (e.g. a RootCAs
+	// pool loaded from a corporate private CA bundle). Insecure still forces
+	// InsecureSkipVerify on top of it.
+	TLSConfig *tls.Config
+
 	HTTPClient *http.Client
+
+	// Logger receives reconnect/error diagnostics. Defaults to slog.Default.
+	Logger *slog.Logger
 
 	// Backoff controls reconnect timing after a dropped connection. Zero values
 	// pick sensible defaults in NewRESTSource.
@@ -39,6 +57,11 @@ type RESTSource struct {
 	cancel    context.CancelFunc
 	closeOnce sync.Once
 	wg        sync.WaitGroup
+
+	// lastTS tracks the most recent event _time delivered, so a reconnect
+	// resumes with earliest=<lastTS> instead of replaying from the original
+	// window. Mutated only inside the single streaming goroutine.
+	lastTS time.Time
 }
 
 // NewRESTSource builds a RESTSource ready to Start. The Search field is wrapped
@@ -51,10 +74,13 @@ func NewRESTSource(cfg RESTConfig) *RESTSource {
 	if cfg.MaxBackoff <= 0 {
 		cfg.MaxBackoff = 30 * time.Second
 	}
+	if cfg.Logger == nil {
+		cfg.Logger = slog.Default()
+	}
 	if cfg.HTTPClient == nil {
 		cfg.HTTPClient = &http.Client{
 			Transport: &http.Transport{
-				TLSClientConfig: &tls.Config{InsecureSkipVerify: cfg.Insecure},
+				TLSClientConfig: buildTLSConfig(cfg.TLSConfig, cfg.Insecure),
 			},
 		}
 	}
@@ -62,6 +88,22 @@ func NewRESTSource(cfg RESTConfig) *RESTSource {
 		cfg: cfg,
 		out: make(chan RawEvent, 256),
 	}
+}
+
+// buildTLSConfig clones base (or starts empty) and applies InsecureSkipVerify
+// when insecure is set. Shared by every Splunk transport so --splunk-ca-cert
+// and --splunk-insecure behave identically across REST/HEC/MCP.
+func buildTLSConfig(base *tls.Config, insecure bool) *tls.Config {
+	var cfg *tls.Config
+	if base != nil {
+		cfg = base.Clone()
+	} else {
+		cfg = &tls.Config{}
+	}
+	if insecure {
+		cfg.InsecureSkipVerify = true //nolint:gosec
+	}
+	return cfg
 }
 
 // Events returns the channel the pipeline reads from.
@@ -89,6 +131,19 @@ func (r *RESTSource) Start(parent context.Context) {
 	go r.run(ctx)
 }
 
+// configError marks a non-retryable failure (HTTP 4xx: bad token, bad search,
+// missing index). The reconnect loop still backs off so it does not hammer the
+// search head, but it logs the cause loudly because a tight retry will never
+// recover without operator action.
+type configError struct {
+	status int
+	body   string
+}
+
+func (e *configError) Error() string {
+	return fmt.Sprintf("splunk export status %d: %s", e.status, e.body)
+}
+
 func (r *RESTSource) run(ctx context.Context) {
 	defer r.wg.Done()
 	backoff := r.cfg.InitialBackoff
@@ -96,12 +151,27 @@ func (r *RESTSource) run(ctx context.Context) {
 		if ctx.Err() != nil {
 			return
 		}
-		err := r.stream(ctx)
+		delivered, err := r.stream(ctx)
 		if ctx.Err() != nil {
 			return
 		}
-		// Connection dropped; wait then reconnect.
-		_ = err
+		// A stream that delivered events before dropping is a healthy
+		// connection that simply ended; reset backoff so a transient blip does
+		// not inflate the reconnect delay.
+		if delivered {
+			backoff = r.cfg.InitialBackoff
+		}
+		var cfgErr *configError
+		switch {
+		case errors.As(err, &cfgErr):
+			r.cfg.Logger.Warn("splunk export rejected the request; check token, search, and index (not retrying tightly)",
+				"status", cfgErr.status, "body", cfgErr.body, "backoff", backoff)
+		case err != nil:
+			r.cfg.Logger.Warn("splunk export connection dropped; reconnecting",
+				"err", err, "backoff", backoff)
+		default:
+			r.cfg.Logger.Info("splunk export stream ended; reconnecting", "backoff", backoff)
+		}
 		select {
 		case <-ctx.Done():
 			return
@@ -115,40 +185,52 @@ func (r *RESTSource) run(ctx context.Context) {
 }
 
 // stream opens one export connection and pushes parsed events until EOF or
-// error. Returns nil only when the connection ends cleanly so the caller can
-// distinguish backoff-worthy failures from a clean Close.
-func (r *RESTSource) stream(ctx context.Context) error {
-	endpoint, err := buildExportURL(r.cfg.BaseURL, r.cfg.Search)
+// error. The bool reports whether any event was delivered on this connection.
+// A *configError return signals a non-retryable 4xx so run can log it clearly.
+func (r *RESTSource) stream(ctx context.Context) (bool, error) {
+	earliest := r.cfg.Earliest
+	if !r.lastTS.IsZero() {
+		// Resume just after the last event we delivered rather than replaying
+		// the original window on every reconnect. Use nanosecond precision so
+		// the inclusive earliest_time boundary only re-delivers events sharing
+		// the exact last-seen timestamp, not the whole trailing second.
+		earliest = r.lastTS.UTC().Format(time.RFC3339Nano)
+	}
+	endpoint, err := buildExportURL(r.cfg.BaseURL, r.cfg.Search, earliest, r.cfg.Latest)
 	if err != nil {
-		return err
+		return false, err
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
-		return err
+		return false, err
 	}
 	req.Header.Set("Authorization", "Bearer "+r.cfg.Token)
 	req.Header.Set("Accept", "application/json")
 
 	resp, err := r.cfg.HTTPClient.Do(req)
 	if err != nil {
-		return err
+		return false, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode/100 != 2 {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return fmt.Errorf("splunk export status %d: %s", resp.StatusCode, body)
+		if resp.StatusCode/100 == 4 {
+			return false, &configError{status: resp.StatusCode, body: strings.TrimSpace(string(body))}
+		}
+		return false, fmt.Errorf("splunk export status %d: %s", resp.StatusCode, body)
 	}
 	return r.readLines(ctx, resp.Body)
 }
 
-func (r *RESTSource) readLines(ctx context.Context, body io.Reader) error {
+func (r *RESTSource) readLines(ctx context.Context, body io.Reader) (bool, error) {
 	scanner := bufio.NewScanner(body)
 	// Splunk preview rows can be large; bump the buffer past the default 64KB.
 	buf := make([]byte, 0, 1<<20)
 	scanner.Buffer(buf, 1<<22)
+	delivered := false
 	for scanner.Scan() {
 		if ctx.Err() != nil {
-			return ctx.Err()
+			return delivered, ctx.Err()
 		}
 		line := strings.TrimSpace(scanner.Text())
 		if line == "" {
@@ -160,11 +242,24 @@ func (r *RESTSource) readLines(ctx context.Context, body io.Reader) error {
 		}
 		select {
 		case r.out <- evt:
+			delivered = true
+			if evt.TS.After(r.lastTS) {
+				r.lastTS = evt.TS
+			}
 		case <-ctx.Done():
-			return ctx.Err()
+			return delivered, ctx.Err()
 		}
 	}
-	return scanner.Err()
+	if err := scanner.Err(); err != nil {
+		// An oversized line (past the 4MB cap) must not tear down the stream
+		// into a reconnect loop; log and treat as a clean end so we resume.
+		if errors.Is(err, bufio.ErrTooLong) {
+			r.cfg.Logger.Warn("splunk export line exceeded scanner buffer; skipping oversized row", "err", err)
+			return delivered, nil
+		}
+		return delivered, err
+	}
+	return delivered, nil
 }
 
 // decodeExportLine parses one preview row from the export stream. The
@@ -200,6 +295,17 @@ func wrapEvent(raw map[string]any) (RawEvent, bool) {
 	}, true
 }
 
+// adObjectEIDs are the AD object-change Event IDs the engine's AD parser
+// consumes. These arrive on the WinEventLog:Security channel (not
+// Directory-Service), so classify must route them to SourceADAudit by EID even
+// though the sourcetype says "security".
+var adObjectEIDs = map[string]bool{
+	"4720": true, // user account created
+	"4728": true, // member added to security-enabled global group
+	"4732": true, // member added to security-enabled local group
+	"5136": true, // a directory service object was modified
+}
+
 // classify infers the SourceKind from the Splunk sourcetype/source fields.
 // Falls back to SourceSysmon so an unrecognized event still routes somewhere
 // the schema package can attempt to parse.
@@ -210,15 +316,40 @@ func classify(raw map[string]any) SourceKind {
 	switch {
 	case strings.Contains(hay, "sysmon"):
 		return SourceSysmon
-	case strings.Contains(hay, "security"):
-		return SourceWinsec
 	case strings.Contains(hay, "directory-service") || strings.Contains(hay, "adaudit"):
 		return SourceADAudit
+	case strings.Contains(hay, "security"):
+		// AD object-change EIDs are logged on the Security channel; route them
+		// to the AD parser rather than the Windows Security parser.
+		if adObjectEIDs[eventID(raw)] {
+			return SourceADAudit
+		}
+		return SourceWinsec
 	}
 	return SourceSysmon
 }
 
-func buildExportURL(base, search string) (string, error) {
+// eventID extracts the Windows Event ID from the common field spellings,
+// normalizing numeric values to their string form. Returns "" when absent.
+func eventID(raw map[string]any) string {
+	for _, key := range []string{"EventID", "EventCode", "event_id"} {
+		v, ok := raw[key]
+		if !ok || v == nil {
+			continue
+		}
+		switch x := v.(type) {
+		case string:
+			if s := strings.TrimSpace(x); s != "" {
+				return s
+			}
+		case float64:
+			return strconv.FormatInt(int64(x), 10)
+		}
+	}
+	return ""
+}
+
+func buildExportURL(base, search, earliest, latest string) (string, error) {
 	u, err := url.Parse(base)
 	if err != nil {
 		return "", fmt.Errorf("parse base url: %w", err)
@@ -227,6 +358,12 @@ func buildExportURL(base, search string) (string, error) {
 	q := u.Query()
 	q.Set("output_mode", "json")
 	q.Set("search", search)
+	if earliest != "" {
+		q.Set("earliest_time", earliest)
+	}
+	if latest != "" {
+		q.Set("latest_time", latest)
+	}
 	u.RawQuery = q.Encode()
 	return u.String(), nil
 }

@@ -70,24 +70,28 @@ func (b *Broadcaster) Subscribe() *Subscriber {
 // that received the message; subscribers whose outbox was full are dropped and
 // counted in DropCount.
 func (b *Broadcaster) Send(msg types.WSMessage) int {
+	// Hold the read lock across the non-blocking sends. The sends use a select
+	// with a default case so they never block, which keeps the critical section
+	// bounded. Holding the lock here is what makes the channel send safe: an
+	// unsubscribe (or Close) that wants to close a subscriber's outbox needs the
+	// write lock, so it cannot close a channel out from under an in-flight send.
+	// Closing outside this guard caused a "send on closed channel" panic when a
+	// client disconnected (or was dropped by a concurrent Send) mid-broadcast.
 	b.mu.RLock()
-	// Snapshot the subscriber list so we don't hold the lock during sends.
-	snap := make([]*Subscriber, 0, len(b.subs))
-	for _, s := range b.subs {
-		snap = append(snap, s)
-	}
-	b.mu.RUnlock()
-
 	delivered := 0
 	var dropIDs []uint64
-	for _, s := range snap {
+	for id, s := range b.subs {
 		select {
 		case s.out <- msg:
 			delivered++
 		default:
-			dropIDs = append(dropIDs, s.id)
+			dropIDs = append(dropIDs, id)
 		}
 	}
+	b.mu.RUnlock()
+
+	// Drop slow clients after releasing the read lock: unsubscribe takes the
+	// write lock and would otherwise deadlock against the RLock above.
 	for _, id := range dropIDs {
 		b.DropCount.Add(1)
 		b.unsubscribe(id)
