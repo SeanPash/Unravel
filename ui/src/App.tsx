@@ -351,12 +351,12 @@ export default function App() {
         const chain = incident?.chain ?? null
         const phases = buildAttackPhases(chain, edges, incident?.narration ?? null)
         const foci = buildTechniqueFoci(chain, edges, phases)
-        return buildNodeContext(nodeId, state.nodes, edges, chain, phases, foci)
+        return buildNodeContext(nodeId, state.nodes, edges, chain, phases, foci, state.logs)
       }
-      return buildNodeContext(nodeId, state.nodes, edges, activeChain, attackPhases, techniqueFoci)
+      return buildNodeContext(nodeId, state.nodes, edges, activeChain, attackPhases, techniqueFoci, state.logs)
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [state.nodes, state.edges, state.incidents, state.activeIncidentId, activeChain, attackPhases, techniqueFoci],
+    [state.nodes, state.edges, state.logs, state.incidents, state.activeIncidentId, activeChain, attackPhases, techniqueFoci],
   )
 
   const relatedLogs = selectRelatedLogs(
@@ -417,6 +417,13 @@ export default function App() {
                 getNodeContext={getNodeContext}
                 onPhaseSelect={handlePhaseSelect}
                 onTechniqueSelect={handleTechniqueSelect}
+                onEventOpen={(_eventId, ts) => {
+                  // From an inspector evidence row: surface the Logs tab and
+                  // drive the timeline to that event's moment. Node focus is
+                  // kept, so the Logs list stays scoped to this node.
+                  dispatch({ type: 'set_tab', payload: 'logs' })
+                  dispatch({ type: 'jump_to_ts', payload: ts })
+                }}
               />
               {edges.length > 0 && (
                 <TimeScrubber

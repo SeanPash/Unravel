@@ -36,6 +36,9 @@ export interface GraphViewProps {
   getNodeContext?: (nodeId: string, incidentId?: string) => NodeContext | null
   onPhaseSelect?: (phase: AttackPhase) => void
   onTechniqueSelect?: (techniqueId: string) => void
+  // An inspector evidence row was opened: navigate the rest of the app to
+  // that raw event (e.g. the Logs tab and the timeline moment).
+  onEventOpen?: (eventId: string, ts: number) => void
 }
 
 export interface PhaseFocus {
@@ -155,19 +158,22 @@ export function chainTimestamps(chain: ChainResultPayload | null): Set<number> {
 // --- Edge lengths ---
 // Edges stretch so their relationship label fits between the endpoints: the
 // cola layout is asked for a per-edge length sized to the text, capped so a
-// very long kind cannot blow the layout apart. Width math assumes the 9px
-// JetBrains Mono set in CY_STYLE.
+// very long kind cannot blow the layout apart. Width math assumes the 10px
+// uppercase Oswald set in CY_STYLE (condensed, so a low per-char width).
 
-const EDGE_LABEL_FONT_PX = 9
-const EDGE_LABEL_CHAR_W = EDGE_LABEL_FONT_PX * 0.62
-// Keeps labels clear of the node bodies and the arrowhead at both ends.
-const EDGE_LABEL_CLEARANCE = 30
-// The fixed cola edgeLength this graph used before; short labels do not
-// shrink edges below it.
-const EDGE_LENGTH_MIN = 110
-const EDGE_LENGTH_MAX = 230
+const EDGE_LABEL_FONT_PX = 10
+const EDGE_LABEL_CHAR_W = EDGE_LABEL_FONT_PX * 0.56
+// Keeps the verb clear of the node bodies, their name chips, and the
+// arrowhead at both ends. A node name chip hangs well below its node, so the
+// edge needs enough length that its mid-edge verb never lands on a
+// neighbor's name. This clearance is the dominant anti-overlap lever.
+const EDGE_LABEL_CLEARANCE = 70
+// Floor on edge length so even an unlabeled or short-verb edge keeps its
+// endpoints far enough apart that their name chips do not collide.
+const EDGE_LENGTH_MIN = 190
+const EDGE_LENGTH_MAX = 360
 // Extra room so a label still reads when the simulation compresses the edge.
-const EDGE_LENGTH_LABEL_ALLOWANCE = 26
+const EDGE_LENGTH_LABEL_ALLOWANCE = 40
 
 export function desiredEdgeLength(kind: string): number {
   const textWidth = (kind.replace(/_/g, ' ').length + 1) * EDGE_LABEL_CHAR_W
@@ -198,17 +204,24 @@ const CY_STYLE = [
       'label': 'data(abbrev)',
       'font-size': 10,
       'font-family': '"JetBrains Mono", "Fira Code", monospace',
-      'color': '#c8d2da',
+      'font-weight': 500,
+      'color': '#dce4ec',
       'text-opacity': 0,
       'text-valign': 'bottom',
       'text-halign': 'center',
-      'text-margin-y': 12,
-      // Outline halo instead of a rectangular plate - blends with graph
-      'text-background-opacity': 0,
-      'text-outline-color': '#12171c',
-      'text-outline-width': 2,
-      'text-outline-opacity': 0.9,
-      'transition-property': 'opacity, text-opacity, border-opacity',
+      'text-margin-y': 14,
+      // A quiet rounded chip rather than a bare halo: it masks the dot grid
+      // and any line passing beneath, so a name never smears into the graph
+      // or into a relationship label sharing the same patch of canvas.
+      'text-background-color': '#0d1116',
+      'text-background-opacity': 0.85,
+      'text-background-shape': 'roundrectangle',
+      'text-background-padding': 3,
+      'text-border-color': '#2b3640',
+      'text-border-width': 1,
+      'text-border-opacity': 0.7,
+      'text-outline-width': 0,
+      'transition-property': 'opacity, text-opacity, border-opacity, text-background-opacity',
       'transition-duration': 150,
     },
   },
@@ -275,19 +288,31 @@ const CY_STYLE = [
       'arrow-scale': 0.65,
       'curve-style': 'bezier',
       // Relationship label, hidden by default to keep the graph scannable.
-      // Hover, pinning, or attack-chain membership reveals the full text,
-      // floated above the line with a soft halo (no box) for legibility.
+      // Hover, pinning, or attack-chain membership reveals the full text.
+      // Set in the theme's condensed display caps so a relationship verb
+      // reads as a distinct tag, never mistaken for the monospace node names
+      // it sits between. It rides a solid chip centered on the line, which
+      // masks the wire so the word is never tangled in it.
       'label': (ele: cytoscape.EdgeSingular) => ((ele.data('kind') as string) ?? '').replace(/_/g, ' '),
       'font-size': EDGE_LABEL_FONT_PX,
-      'font-family': '"JetBrains Mono", "Fira Code", monospace',
-      'color': '#b9c6d2',
+      'font-family': '"Oswald", "Arial Narrow", sans-serif',
+      'font-weight': 500,
+      'text-transform': 'uppercase',
+      'color': '#cfdae4',
       'text-rotation': 'autorotate',
-      'text-margin-y': -8,
+      'text-margin-y': 0,
       'text-opacity': 0,
-      'text-outline-color': '#0c0d10',
-      'text-outline-width': 2.5,
-      'text-outline-opacity': 0.95,
-      'transition-property': 'opacity, text-opacity, width',
+      'text-background-color': '#11171d',
+      'text-background-opacity': 0.94,
+      'text-background-shape': 'roundrectangle',
+      'text-background-padding': 3,
+      // The chip wears a hairline in the edge's own confidence color, tying
+      // the tag back to the link it names.
+      'text-border-color': (ele: cytoscape.EdgeSingular) => scoreToColor((ele.data('confidence') as number) ?? 0.5),
+      'text-border-width': 1,
+      'text-border-opacity': 0.6,
+      'text-outline-width': 0,
+      'transition-property': 'opacity, text-opacity, width, text-background-opacity',
       'transition-duration': 150,
     },
   },
@@ -303,8 +328,13 @@ const CY_STYLE = [
       'line-color': '#dc4e41',
       'target-arrow-color': '#dc4e41',
       'width': 2.5,
-      // Attack-path edges always tell their story
-      'text-opacity': 0.9,
+      // Attack-path edges always tell their story, on a red-tinted chip so
+      // the relationship reads as part of the highlighted chain.
+      'text-opacity': 1,
+      'color': '#ffdbd5',
+      'text-background-color': '#1c0f0e',
+      'text-border-color': '#dc4e41',
+      'text-border-opacity': 0.9,
     },
   },
   // Hovered or pinned edges thicken slightly and reveal their relationship
@@ -313,6 +343,7 @@ const CY_STYLE = [
     style: {
       'width': 2.5,
       'text-opacity': 1,
+      'text-background-opacity': 0.98,
     },
   },
   {
@@ -380,6 +411,9 @@ const CY_STYLE = [
       'text-margin-y': -8,
       'text-opacity': 0.85,
       'text-outline-opacity': 0,
+      // Cluster titles float free; no chip, so they never read as a node name.
+      'text-background-opacity': 0,
+      'text-border-opacity': 0,
     },
   },
   // Nodes reached by more than one incident: they sit between sections and
@@ -413,6 +447,10 @@ const CY_STYLE = [
       'line-color': 'data(phaseColor)',
       'target-arrow-color': 'data(phaseColor)',
       'opacity': 1,
+      // When a phase chip does surface (hover/pin), its hairline matches the
+      // phase color the members are painted in.
+      'text-border-color': 'data(phaseColor)',
+      'text-border-opacity': 0.85,
     },
   },
   {
@@ -438,7 +476,7 @@ const COLA_OPTIONS: ColaLayoutOptions = {
   animate: true,
   fit: false,
   centerGraph: false,
-  nodeSpacing: 24,
+  nodeSpacing: 55,
   edgeLength: (edge) =>
     edge.data('crossSection')
       ? CROSS_SECTION_EDGE_LENGTH
@@ -483,7 +521,7 @@ interface OpenInspector {
 // rows, and scrolling inside the body stay ordinary clicks.
 function DraggableInspector({
   entry, context, zIndex, focused, container,
-  onMove, onSelect, onClose, onNodeFocus, onPhaseSelect, onTechniqueSelect,
+  onMove, onSelect, onClose, onNodeFocus, onPhaseSelect, onTechniqueSelect, onEventOpen,
 }: {
   entry: OpenInspector
   context: NodeContext
@@ -496,6 +534,7 @@ function DraggableInspector({
   onNodeFocus: (nodeId: string) => void
   onPhaseSelect: (phase: AttackPhase) => void
   onTechniqueSelect: (techniqueId: string) => void
+  onEventOpen: (eventId: string, ts: number) => void
 }) {
   const dragRef = useRef<{ dx: number; dy: number } | null>(null)
   return (
@@ -529,18 +568,19 @@ function DraggableInspector({
       onNodeFocus={onNodeFocus}
       onPhaseSelect={onPhaseSelect}
       onTechniqueSelect={onTechniqueSelect}
+      onEventOpen={onEventOpen}
     />
   )
 }
 
-const INSPECTOR_WIDTH = 270
+const INSPECTOR_WIDTH = 290
 // Cascade offset for each newly opened drawer so they stack readably.
 const INSPECTOR_CASCADE = 26
 
 export function GraphView({
   nodes, edges, chain, timeWindow, focusedNodeId, onNodeFocus,
   incidents, activeIncidentId, onIncidentSelect, phaseFocus,
-  getNodeContext, onPhaseSelect, onTechniqueSelect,
+  getNodeContext, onPhaseSelect, onTechniqueSelect, onEventOpen,
 }: GraphViewProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const cyRef = useRef<Core | null>(null)
@@ -1547,6 +1587,7 @@ export function GraphView({
             onNodeFocus={(id) => onNodeFocus?.(id)}
             onPhaseSelect={(p) => onPhaseSelect?.(p)}
             onTechniqueSelect={(id) => onTechniqueSelect?.(id)}
+            onEventOpen={(eventId, ts) => onEventOpen?.(eventId, ts)}
           />
         )
       })}
