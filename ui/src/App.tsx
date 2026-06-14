@@ -13,6 +13,7 @@ import { buildNodeContext } from './nodeContext'
 import { displayRange, buildPhases } from './timeline'
 import { useDashboardLayout } from './useDashboardLayout'
 import { PanelTitle, ResizeHandle } from './DashboardChrome'
+import { ArrowCounterClockwise, GitFork } from '@phosphor-icons/react'
 import './App.css'
 
 const WS_URL = (import.meta.env.VITE_WS_URL as string | undefined) ?? `ws://${window.location.host}/ws`
@@ -286,6 +287,12 @@ export default function App() {
   const nodes = Object.values(state.nodes)
   const edges = Object.values(state.edges)
   const incidents = Object.values(state.incidents)
+  // True while new incidents are still arriving or being enriched: the initial
+  // connect, or any incident whose chain landed but whose AI narration/intel is
+  // still pending. Drives the loading indicator on the graph's left rail.
+  const incidentsLoading =
+    state.status === 'connecting' ||
+    incidents.some((i) => i.awaitingNarration || i.awaitingIntel)
   const active = state.activeIncidentId ? state.incidents[state.activeIncidentId] ?? null : null
   const activeChain = active?.chain ?? null
 
@@ -384,12 +391,18 @@ export default function App() {
     <div className="app">
       <header className="app-bar">
         <div className="app-bar-brand">
-          <span className="app-bar-logo">
-            splunk<span className="app-bar-logo-caret">&gt;</span>
-          </span>
-          <span className="app-title">Causal Reconstruction Engine</span>
+          <GitFork className="app-bar-icon" size={20} weight="bold" aria-hidden="true" />
+          <span className="app-bar-wordmark">Unravel</span>
         </div>
-        <StatusBadge status={state.status} />
+        <button
+          type="button"
+          className="reset-grids-btn"
+          onClick={layout.resetAll}
+          title="Reset all sections to their original sizes"
+        >
+          <ArrowCounterClockwise size={13} weight="bold" aria-hidden="true" />
+          Reset grids
+        </button>
       </header>
       <main
         className="app-main"
@@ -401,7 +414,11 @@ export default function App() {
           ref={layout.rowGridRef}
           style={{ gridTemplateColumns: layout.colTemplate }}
         >
-          <div className="dash-cell" ref={layout.registerCell(0)}>
+          <div
+            className="dash-cell"
+            ref={layout.registerCell(0)}
+            onDoubleClick={() => layout.resetSection('incidents')}
+          >
           <aside className={`dash-panel incident-pane${layout.collapsed.incidents ? ' dash-panel-collapsed' : ''}`}>
             <PanelTitle
               label="Incidents"
@@ -417,7 +434,11 @@ export default function App() {
             </div>
           </aside>
           </div>
-          <div className="dash-cell" ref={layout.registerCell(1)}>
+          <div
+            className="dash-cell"
+            ref={layout.registerCell(1)}
+            onDoubleClick={() => layout.resetSection('graph')}
+          >
           <section className={`dash-panel graph-pane${layout.collapsed.graph ? ' dash-panel-collapsed' : ''}`}>
             <PanelTitle
               label="Provenance Graph"
@@ -433,6 +454,7 @@ export default function App() {
                 focusedNodeId={state.focusedNodeId}
                 onNodeFocus={(id) => dispatch({ type: 'focus_node', payload: id })}
                 incidents={incidents}
+                loading={incidentsLoading}
                 activeIncidentId={state.activeIncidentId}
                 onIncidentSelect={(id) => dispatch({ type: 'select_incident', payload: id })}
                 phaseFocus={phaseFocus}
@@ -501,7 +523,11 @@ export default function App() {
               />
             )}
           </div>
-          <div className="dash-cell" ref={layout.registerCell(2)}>
+          <div
+            className="dash-cell"
+            ref={layout.registerCell(2)}
+            onDoubleClick={() => layout.resetSection('narration')}
+          >
           <aside className={`dash-panel narration-pane${layout.collapsed.narration ? ' dash-panel-collapsed' : ''}`}>
             <PanelTitle
               label="Attack Phases"
@@ -528,7 +554,11 @@ export default function App() {
             />
           )}
         </div>
-        <div className="dash-cell detail-cell" ref={layout.detailRef}>
+        <div
+          className="dash-cell detail-cell"
+          ref={layout.detailRef}
+          onDoubleClick={() => layout.resetSection('detail')}
+        >
           <DetailTabs
             activeTab={state.activeTab}
             onTabChange={(tab) => dispatch({ type: 'set_tab', payload: tab })}
@@ -553,23 +583,9 @@ export default function App() {
           />
         </div>
         <div className="dash-resize-hint" ref={layout.hintRef} aria-hidden="true">
-          Double-click to reset
+          Double-click section to reset
         </div>
       </main>
     </div>
-  )
-}
-
-const STATUS_LABELS: Record<AppState['status'], string> = {
-  connecting: 'Connecting...',
-  live: 'Live',
-  reconnecting: 'Reconnecting...',
-}
-
-function StatusBadge({ status }: { status: AppState['status'] }) {
-  return (
-    <span className={`status-badge status-${status}`}>
-      {STATUS_LABELS[status]}
-    </span>
   )
 }

@@ -62,6 +62,9 @@ export function ResizeHandle({
       className={className}
       onPointerDown={handle.onPointerDown}
       onDoubleClick={handle.onDoubleClick}
+      onPointerEnter={handle.onPointerEnter}
+      onPointerMove={handle.onPointerMove}
+      onPointerLeave={handle.onPointerLeave}
     >
       <span className="resize-grip" aria-hidden="true" />
     </div>

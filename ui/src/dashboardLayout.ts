@@ -104,3 +104,13 @@ export function rowTemplate(ratios: readonly number[], detailCollapsed: boolean)
   if (detailCollapsed) return '1fr auto'
   return `${frTrack(ratios[0])} ${frTrack(ratios[1])}`
 }
+
+// Which grid axes size a given panel. Every top-row panel (incidents, graph,
+// narration) is sized by both the column split (its width) and the row split
+// (the shared top-row height), so resetting any of them restores both axes.
+// The full-width detail row is sized by the row split alone.
+export type PanelKey = 'incidents' | 'graph' | 'narration' | 'detail'
+export function sectionResetAxes(key: PanelKey): { cols: boolean; rows: boolean } {
+  if (key === 'detail') return { cols: false, rows: true }
+  return { cols: true, rows: true }
+}

@@ -1,4 +1,5 @@
 import { useRef, useEffect, useState, useCallback } from 'react'
+import { ArrowsClockwise } from '@phosphor-icons/react'
 import cytoscape from 'cytoscape'
 import cola from 'cytoscape-cola'
 import type { Core } from 'cytoscape'
@@ -23,6 +24,9 @@ export interface GraphViewProps {
   // Incident map: each incident's subgraph lives in its own labeled section
   // of the canvas; selecting an incident flies the camera to its section.
   incidents?: IncidentRef[]
+  // True while new incidents are still streaming in or being enriched, so the
+  // left rail can show a "loading incidents" indicator beneath the minimap.
+  loading?: boolean
   activeIncidentId?: string | null
   onIncidentSelect?: (incidentId: string) => void
   // Selected attack phase: its members light up in the phase color, the rest
@@ -579,7 +583,7 @@ const INSPECTOR_CASCADE = 26
 
 export function GraphView({
   nodes, edges, chain, timeWindow, focusedNodeId, onNodeFocus,
-  incidents, activeIncidentId, onIncidentSelect, phaseFocus,
+  incidents, loading, activeIncidentId, onIncidentSelect, phaseFocus,
   getNodeContext, onPhaseSelect, onTechniqueSelect, onEventOpen,
 }: GraphViewProps) {
   const containerRef = useRef<HTMLDivElement>(null)
@@ -591,6 +595,11 @@ export function GraphView({
   const firstBatch = useRef(true)
   const [edgeTooltip, setEdgeTooltip] = useState<EdgeTooltip | null>(null)
   const [mini, setMini] = useState<MinimapData | null>(null)
+  // Minimap size tracks the graph panel (and therefore the screen): a fixed
+  // fraction of the panel, clamped, with the height following the panel's
+  // aspect ratio so it reads as a true scaled-down view. Keeps the minimap
+  // small when the graph section is small and lets it grow when it is large.
+  const [miniSize, setMiniSize] = useState<{ w: number; h: number }>({ w: 192, h: 128 })
   const [glows, setGlows] = useState<SectionGlow[]>([])
   const assignmentRef = useRef<IncidentAssignment | null>(null)
   const sectionedIds = useRef(new Set<string>())
@@ -614,6 +623,28 @@ export function GraphView({
   const activeIncidentIdRef = useRef(activeIncidentId)
   useEffect(() => { activeIncidentIdRef.current = activeIncidentId })
 
+  // Scale the minimap with the graph panel. Re-runs whenever the panel
+  // resizes (window, screen, or a dashboard section drag).
+  useEffect(() => {
+    const el = containerRef.current
+    if (!el) return
+    const clamp = (v: number, lo: number, hi: number) => Math.min(Math.max(v, lo), hi)
+    const measure = () => {
+      const w = el.clientWidth
+      const h = el.clientHeight
+      if (w === 0 || h === 0) return
+      const mw = Math.round(clamp(w * 0.2, 96, 232))
+      const mh = Math.round(clamp(mw * (h / w), 64, 188))
+      setMiniSize((prev) => (prev.w === mw && prev.h === mh ? prev : { w: mw, h: mh }))
+    }
+    measure()
+    // ResizeObserver is absent in jsdom; the one-off measure above still runs.
+    if (typeof ResizeObserver === 'undefined') return
+    const ro = new ResizeObserver(measure)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
+
   // Snapshot of the map overlays: minimap content (section frames, orphan
   // nodes, related pairs, viewport) plus the focus fog circles for the
   // active and hovered incidents. Reads refs only, so cy event handlers can
@@ -621,13 +652,8 @@ export function GraphView({
   const recomputeMini = useCallback(() => {
     const cy = cyRef.current
     if (!cy) return
-    const parents = cy.nodes(':parent')
-    if (parents.length === 0) {
-      setMini(null)
-      setGlows([])
-      return
-    }
     lastMiniAt.current = performance.now()
+    const parents = cy.nodes(':parent')
     const sections = parents.map((p) => ({
       id: p.data('incidentId') as string,
       label: p.data('label') as string,
@@ -638,8 +664,14 @@ export function GraphView({
       .nodes(':childless')
       .filter((n) => n.isOrphan() && n.visible())
       .map((n: cytoscape.NodeSingular) => ({ x: n.position('x'), y: n.position('y') }))
+    // The minimap is a permanent instrument, on screen from the first frame
+    // before any incident exists. Until the graph has any geometry, the world
+    // falls back to the live camera extent so the map reads as an empty field
+    // with the viewport window over it, rather than vanishing until the first
+    // incident section forms.
+    const world = cy.elements().nonempty() ? cy.elements().boundingBox({}) : cy.extent()
     setMini({
-      world: cy.elements().boundingBox({}),
+      world,
       sections,
       orphanDots,
       viewport: cy.extent(),
@@ -904,6 +936,11 @@ export function GraphView({
       clearTimeout(panTimer)
       panTimer = setTimeout(snapToNearest, 380)
     })
+
+    // Seed the minimap right after mount so it is on screen from the first
+    // frame, not only once a render/viewport event or the first incident
+    // populates it.
+    recomputeMini()
 
     return () => {
       cancelAnimationFrame(rafId)
@@ -1508,16 +1545,31 @@ export function GraphView({
           style={{ left: g.x, top: g.y, width: g.d, height: g.d }}
         />
       ))}
-      {mini && (
-        <Minimap
-          data={mini}
-          onSectionClick={handleMiniSection}
-          onJump={handleMiniJump}
-          onHover={handleMiniHover}
-          onHoverEnd={handleMiniHoverEnd}
-          onHoverIncident={handleMiniHoverIncident}
-        />
-      )}
+      <div className="graph-left-rail">
+        {mini && (
+          <Minimap
+            data={mini}
+            width={miniSize.w}
+            height={miniSize.h}
+            onSectionClick={handleMiniSection}
+            onJump={handleMiniJump}
+            onHover={handleMiniHover}
+            onHoverEnd={handleMiniHoverEnd}
+            onHoverIncident={handleMiniHoverIncident}
+          />
+        )}
+        {loading && (
+          <div className="graph-loading" role="status" aria-live="polite">
+            <ArrowsClockwise
+              className="graph-loading-icon"
+              size={13}
+              weight="bold"
+              aria-hidden="true"
+            />
+            <span className="graph-loading-label">Loading incidents</span>
+          </div>
+        )}
+      </div>
       <div className="graph-controls">
         <button className="graph-ctrl-btn" title="Zoom in" onClick={() => zoomBy(1.25)}>+</button>
         <button className="graph-ctrl-btn" title="Zoom out" onClick={() => zoomBy(0.8)}>&#8722;</button>

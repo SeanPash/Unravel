@@ -33,68 +33,63 @@
   pointer-events: none;
 }
 
+/* Brand lockup pinned to the left of the bar: graph-node glyph plus wordmark. */
 .app-bar-brand {
   display: flex;
-  align-items: baseline;
-  gap: var(--space-3);
-  min-width: 0;
+  align-items: center;
+  gap: var(--space-2);
 }
 
-.app-bar-logo {
-  font-family: var(--font-display);
-  font-size: 20px;
-  font-weight: 700;
-  color: #ffffff;
-  letter-spacing: 0.02em;
-  white-space: nowrap;
-  text-transform: uppercase;
-}
-
-.app-bar-logo-caret {
+/* The graph-node glyph echoes the provenance graph this tool reconstructs,
+   in the project's green accent. */
+.app-bar-icon {
   color: var(--accent-green);
-  margin: 0 1px;
+  flex-shrink: 0;
 }
 
-.app-title {
-  font-family: var(--font-display);
-  font-size: 10px;
-  font-weight: 400;
-  color: var(--text-faint);
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-/* ─── Status badge ────────────────────────────────────────────────────── */
-
-.status-badge {
-  font-family: var(--font-display);
-  font-size: 10px;
+.app-bar-wordmark {
+  font-family: var(--font-mono);
+  font-size: 18px;
   font-weight: 500;
-  padding: 3px var(--space-2);
-  border-radius: var(--radius);
-  letter-spacing: 0.1em;
+  color: var(--text-primary);
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+}
+
+/* ─── Reset grids button ──────────────────────────────────────────────── */
+
+.reset-grids-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-display);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.12em;
   text-transform: uppercase;
-}
-
-.status-connecting {
-  background: var(--bg-elevated);
-  color: var(--text-faint);
-  border: 1px solid var(--border);
-}
-
-.status-live {
-  background: rgba(83, 160, 81, 0.12);
   color: var(--accent-green);
+  background: rgba(83, 160, 81, 0.08);
   border: 1px solid rgba(83, 160, 81, 0.4);
+  border-radius: var(--radius);
+  padding: 5px var(--space-3);
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease,
+    color 0.15s ease, transform 0.1s ease;
 }
 
-.status-reconnecting {
-  background: rgba(240, 180, 41, 0.1);
-  color: var(--accent-amber);
-  border: 1px solid rgba(240, 180, 41, 0.4);
+.reset-grids-btn:hover {
+  background: rgba(83, 160, 81, 0.18);
+  border-color: var(--accent-green);
+  color: #cbe8c9;
+}
+
+.reset-grids-btn:active {
+  transform: translateY(1px);
+}
+
+.reset-grids-btn:focus-visible {
+  outline: 2px solid var(--accent-green);
+  outline-offset: 2px;
 }
 
 /* ─── Main layout ─────────────────────────────────────────────────────── */
@@ -346,14 +341,30 @@
 
 /* ─── Incident minimap ────────────────────────────────────────────────── */
 
-/* An inset instrument, not a floating decoration: crisp dark bezel, dot-grid
-   terrain, severity-tinted incident clusters, and a bright camera window cut
-   out of a dim scrim, the convention every canvas minimap shares. */
-.graph-minimap {
+/* Left rail: stacks the minimap and the loading indicator against the graph's
+   top-left edge, so the loader hugs that side directly below the map. The rail
+   owns the overlay position; its children opt back into pointer events. */
+.graph-left-rail {
   position: absolute;
   z-index: 50;
   left: var(--space-3);
   top: var(--space-3);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-2);
+  pointer-events: none;
+}
+
+.graph-left-rail > * {
+  pointer-events: auto;
+}
+
+/* An inset instrument, not a floating decoration: crisp dark bezel, dot-grid
+   terrain, severity-tinted incident clusters, and a bright camera window cut
+   out of a dim scrim, the convention every canvas minimap shares. */
+.graph-minimap {
+  position: relative;
   background: rgba(12, 13, 16, 0.92);
   border: 1px solid rgba(79, 167, 217, 0.28);
   border-radius: 5px;
@@ -470,6 +481,56 @@
 .graph-minimap:hover .minimap-viewport {
   stroke-width: 1.5;
   filter: drop-shadow(0 0 3px rgba(79, 167, 217, 0.5));
+}
+
+/* ─── Incident loading indicator ──────────────────────────────────────── */
+
+/* Sits on the left rail beneath the minimap while new incidents stream in.
+   Wears the same dark bezel and blue accent as the minimap so it reads as
+   part of the same instrument, with a spinning sync arrow to mark activity. */
+.graph-loading {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 10px 5px 9px;
+  background: rgba(12, 13, 16, 0.92);
+  border: 1px solid rgba(79, 167, 217, 0.28);
+  border-left: 2px solid var(--accent-blue-bright);
+  border-radius: 5px;
+  box-shadow:
+    0 0 0 1px rgba(8, 9, 12, 0.8),
+    0 6px 20px rgba(0, 0, 0, 0.55),
+    inset 0 1px 0 rgba(221, 227, 233, 0.05);
+  animation: graph-loading-in 0.2s ease-out;
+}
+
+.graph-loading-icon {
+  color: var(--accent-blue-bright);
+  animation: spin 0.9s linear infinite;
+  flex: none;
+}
+
+.graph-loading-label {
+  font-family: var(--font-display);
+  font-size: 9px;
+  font-weight: 500;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  white-space: nowrap;
+  user-select: none;
+}
+
+@keyframes graph-loading-in {
+  from { opacity: 0; transform: translateY(-3px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* Reduced motion: drop the spin and the entrance; the label still reads as
+   activity. */
+@media (prefers-reduced-motion: reduce) {
+  .graph-loading { animation: none; }
+  .graph-loading-icon { animation: none; }
 }
 
 .minimap-crosshair line {
