@@ -1,3 +1,4 @@
+import { CaretDown } from '@phosphor-icons/react'
 import { LogsPanel } from './LogsPanel'
 import { AttackPanel } from './AttackPanel'
 import { ThreatIntelPanel } from './ThreatIntelPanel'
@@ -32,6 +33,10 @@ export interface DetailTabsProps {
   onTechniqueSelect?: (techniqueId: string) => void
   activeTechniqueId?: string | null
   chainTechniqueIds?: string[]
+  // Collapse the whole detail panel down to its tab bar, the horizontal twin of
+  // the columns' rail collapse.
+  collapsed?: boolean
+  onToggleCollapse?: () => void
 }
 
 const TABS: { id: DetailTab; label: string }[] = [
@@ -42,9 +47,9 @@ const TABS: { id: DetailTab; label: string }[] = [
 ]
 
 export function DetailTabs(props: DetailTabsProps) {
-  const { activeTab, onTabChange } = props
+  const { activeTab, onTabChange, collapsed = false, onToggleCollapse } = props
   return (
-    <section className="dash-panel detail-tabs">
+    <section className={`dash-panel detail-tabs${collapsed ? ' detail-tabs-collapsed' : ''}`}>
       <div className="detail-tabs-header" role="tablist">
         {TABS.map((t) => (
           <button
@@ -58,6 +63,19 @@ export function DetailTabs(props: DetailTabsProps) {
             {t.label}
           </button>
         ))}
+        {onToggleCollapse && (
+          <button
+            type="button"
+            className="detail-tabs-toggle"
+            aria-expanded={!collapsed}
+            onClick={onToggleCollapse}
+            title={collapsed ? 'Expand the detail panel' : 'Collapse the detail panel'}
+          >
+            <span className="dash-panel-caret" aria-hidden="true">
+              <CaretDown size={12} weight="bold" />
+            </span>
+          </button>
+        )}
       </div>
       <div className="dash-panel-body detail-tabs-body">
         {activeTab === 'trace' && (
