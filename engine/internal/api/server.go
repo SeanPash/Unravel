@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"crypto/subtle"
 	"errors"
 	"io/fs"
 	"net/http"
@@ -21,35 +22,66 @@ type Server struct {
 	Static   fs.FS
 	Upgrader websocket.Upgrader
 
+	// AuthToken, when non-empty, is a shared bearer token required on every
+	// route (HTTP and the /ws upgrade) via "Authorization: Bearer <token>" or
+	// a "token" query parameter (the WebSocket browser API cannot set headers).
+	AuthToken string
+
+	// AllowEmptyOrigin permits WebSocket upgrades that carry no Origin header.
+	// Only set this for loopback binds; a non-loopback listener should reject
+	// origin-less requests to blunt cross-site WebSocket hijacking.
+	AllowEmptyOrigin bool
+
 	WriteTimeout time.Duration
 	PingInterval time.Duration
 }
 
 // NewServer returns a Server with sensible defaults. Static may be nil during
 // development when the React app is served by Vite on a separate port.
-func NewServer(bcast *Broadcaster, static fs.FS) *Server {
-	return &Server{
-		Bcast:  bcast,
-		Static: static,
-		Upgrader: websocket.Upgrader{
-			ReadBufferSize:  1024,
-			WriteBufferSize: 4096,
-			CheckOrigin: func(r *http.Request) bool {
-				origin := r.Header.Get("Origin")
-				if origin == "" {
-					return true
-				}
-				u, err := url.Parse(origin)
-				if err != nil {
-					return false
-				}
-				h := u.Hostname()
-				return h == "localhost" || h == "127.0.0.1"
-			},
-		},
-		WriteTimeout: 5 * time.Second,
-		PingInterval: 30 * time.Second,
+//
+// opts apply after defaults so a caller can set AuthToken/AllowEmptyOrigin
+// before CheckOrigin (which closes over the Server) is consulted.
+func NewServer(bcast *Broadcaster, static fs.FS, opts ...func(*Server)) *Server {
+	s := &Server{
+		Bcast:            bcast,
+		Static:           static,
+		AllowEmptyOrigin: true,
+		WriteTimeout:     5 * time.Second,
+		PingInterval:     30 * time.Second,
 	}
+	for _, opt := range opts {
+		opt(s)
+	}
+	s.Upgrader = websocket.Upgrader{
+		ReadBufferSize:  1024,
+		WriteBufferSize: 4096,
+		CheckOrigin: func(r *http.Request) bool {
+			origin := r.Header.Get("Origin")
+			if origin == "" {
+				// An absent Origin (non-browser client) is only trusted when
+				// the listener is loopback-only.
+				return s.AllowEmptyOrigin
+			}
+			u, err := url.Parse(origin)
+			if err != nil {
+				return false
+			}
+			h := u.Hostname()
+			return h == "localhost" || h == "127.0.0.1"
+		},
+	}
+	return s
+}
+
+// WithAuthToken sets the shared bearer token required on every route.
+func WithAuthToken(token string) func(*Server) {
+	return func(s *Server) { s.AuthToken = token }
+}
+
+// WithAllowEmptyOrigin controls whether origin-less WebSocket upgrades are
+// accepted (true for loopback binds, false otherwise).
+func WithAllowEmptyOrigin(allow bool) func(*Server) {
+	return func(s *Server) { s.AllowEmptyOrigin = allow }
 }
 
 // Handler builds the http.Handler tree. Returned separately from ListenAndServe
@@ -63,7 +95,37 @@ func (s *Server) Handler() http.Handler {
 	if s.Static != nil {
 		mux.Handle("/", http.FileServer(http.FS(s.Static)))
 	}
-	return mux
+	return s.withAuth(mux)
+}
+
+// withAuth wraps next so that, when AuthToken is set, every route except
+// /healthz requires a matching bearer token. /healthz stays open so liveness
+// probes and the startup connectivity check work without a credential.
+func (s *Server) withAuth(next http.Handler) http.Handler {
+	if s.AuthToken == "" {
+		return next
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/healthz" || s.authorized(r) {
+			next.ServeHTTP(w, r)
+			return
+		}
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+	})
+}
+
+// authorized reports whether r carries the configured bearer token, accepting
+// either the Authorization header or a "token" query parameter (the browser
+// WebSocket API cannot set request headers). Comparison is constant-time.
+func (s *Server) authorized(r *http.Request) bool {
+	if s.AuthToken == "" {
+		return true
+	}
+	presented := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+	if presented == "" {
+		presented = r.URL.Query().Get("token")
+	}
+	return subtle.ConstantTimeCompare([]byte(presented), []byte(s.AuthToken)) == 1
 }
 
 // ListenAndServe blocks until ctx is canceled or the server errors out.

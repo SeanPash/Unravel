@@ -66,7 +66,7 @@ func NewMockFromFiles(paths []string, opts ...MockOption) (*MockSource, error) {
 	return newMock(all, opts...)
 }
 
-// NewMockFromEntries is the in-memory constructor — handy for table tests that
+// NewMockFromEntries is the in-memory constructor - handy for table tests that
 // don't want to round-trip through disk.
 func NewMockFromEntries(kindEvents []RawEvent, opts ...MockOption) *MockSource {
 	m := &MockSource{

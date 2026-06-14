@@ -8,7 +8,9 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"regexp"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -123,6 +125,9 @@ func (p *Pipeline) handleRaw(raw splunk.RawEvent) {
 	}
 	updates := materialize(p.cfg.Graph, parsed)
 	for _, u := range updates {
+		if u.authKind != "" {
+			p.cfg.Scorer.SetAuthKind(u.edge, u.authKind)
+		}
 		p.broadcastGraphUpdate(u.node, u.edge)
 		score := p.cfg.Scorer.ScoreEdge(u.edge, p.cfg.Graph)
 		p.cfg.Graph.SetEdgeConfidence(u.edge.ID, score)
@@ -163,13 +168,137 @@ func (p *Pipeline) broadcastLogEvent(raw splunk.RawEvent, eventID string) {
 		EventID: eventID,
 		TS:      raw.TS.Unix(),
 		Source:  string(raw.Kind),
-		Raw:     raw.Raw,
+		Raw:     sanitizeRaw(raw.Raw),
 	})
 	if err != nil {
 		p.cfg.Logger.Warn("encode log_event", "err", err)
 		return
 	}
 	p.cfg.Broadcaster.Send(msg)
+}
+
+// logFieldAllowlist is the set of raw-event fields safe to surface to every
+// connected UI client as source-log evidence. Raw Windows logs routinely carry
+// credentials (in command lines) and PII; anything not on this list is dropped,
+// and CommandLine-style fields are additionally scrubbed for secret patterns.
+// Keys are matched against several common TA/CIM aliases so the allowlist holds
+// regardless of the upstream field mapping. The values the UI reads
+// (timestamp, source, event id, image/process, parent, user, key network
+// fields) all map here.
+var logFieldAllowlist = []string{
+	// identity / routing
+	"EventID", "EventCode", "RecordNumber", "host", "ComputerName", "Computer",
+	"source", "sourcetype", "Channel",
+	// process
+	"Image", "process", "process_path", "Process_Name",
+	"ParentImage", "parent_process", "parent_process_path",
+	"ProcessId", "ParentProcessId",
+	// principals
+	"User", "user", "TargetUserName", "TargetDomainName", "SubjectUserName",
+	"SubjectDomainName", "MemberName", "Account_Name",
+	// auth / kerberos
+	"LogonType", "AuthenticationPackageName", "LogonProcessName", "ServiceName",
+	"Status",
+	// AD object change
+	"ObjectClass", "ObjectDN", "AttributeLDAPDisplayName",
+	// network
+	"IpAddress", "src_ip", "src", "IpPort", "DestinationIp", "dest_ip",
+	"DestinationPort", "dest_port", "Protocol",
+	// command line (scrubbed below, not dropped, since it is core evidence)
+	"CommandLine", "process_command_line", "Process_Command_Line",
+}
+
+// commandLineKeys names the fields treated as command lines: present in the
+// allowlist but redacted for secret patterns rather than passed verbatim.
+var commandLineKeys = map[string]bool{
+	"CommandLine":          true,
+	"process_command_line": true,
+	"Process_Command_Line": true,
+}
+
+// secretArgPattern matches common credential-bearing argument shapes in command
+// lines, e.g. "/user:alice", "-p:hunter2", "/password hunter2",
+// "password=hunter2", "token=abc". Both "/" and "-" flag prefixes and ":", "=",
+// and whitespace separators are handled. The captured flag (group 1) is
+// preserved and the secret value is replaced.
+//
+// The bare-word credential tokens (password, token, secret, key, ...) are
+// anchored at a word boundary so they only fire as standalone argument names,
+// not as substrings inside unrelated identifiers. Without the boundary, common
+// command text like a registry path ending in "...\MyKey value" or "...Key /v"
+// was being shredded because "key" matched mid-word. The flag-prefixed forms
+// ([-/]user, -p, ...) keep their leading prefix as the anchor.
+//
+// The hash-bearing flags (/ntlm, /rc4, /aes256, -hash) are included because the
+// engine's own threat scenario is mimikatz pass-the-hash, where the NT hash is
+// the credential being passed on the command line; without these the secret
+// would survive into broadcast log evidence.
+var secretArgPattern = regexp.MustCompile(`(?i)([-/](?:user|u|p|pass|passwd|pwd|password|ntlm|rc4|aes256|hash)|\b(?:password|passwd|pwd|token|secret|apikey|api[-_]?key|key|ntlm|hash))\s*[:=\s]\s*\S+`)
+
+// netUsePassPattern catches the "net use \\host /user:DOMAIN\acct PASSWORD"
+// form, where the password is a positional token trailing the /user: argument
+// rather than an explicit flag value. The /user: portion (group 1) is kept.
+var netUsePassPattern = regexp.MustCompile(`(?i)([-/]user:\S+)\s+\S+`)
+
+// sanitizeRaw returns a field-allowlisted, secret-scrubbed copy of a raw event
+// safe to broadcast. Fields not on the allowlist are dropped entirely; command
+// lines are kept (they are primary evidence) but have credential-shaped
+// arguments redacted.
+func sanitizeRaw(raw map[string]any) map[string]any {
+	out := make(map[string]any, len(logFieldAllowlist))
+	for _, k := range logFieldAllowlist {
+		v, ok := raw[k]
+		if !ok || v == nil {
+			continue
+		}
+		if commandLineKeys[k] {
+			if s, isStr := v.(string); isStr {
+				out[k] = redactSecrets(s)
+				continue
+			}
+		}
+		out[k] = v
+	}
+	return out
+}
+
+// redactSecrets replaces credential-shaped argument values in a command line
+// with [REDACTED] while preserving the surrounding command text (the flag name)
+// for analysis. It handles explicit credential flags and the net-use style
+// positional password that trails a /user: argument.
+func redactSecrets(cmd string) string {
+	// Redact a positional password following /user:... but only when the next
+	// token is itself not another flag (a following "-x"/"/x" is an option).
+	cmd = netUsePassPattern.ReplaceAllStringFunc(cmd, func(m string) string {
+		loc := netUsePassPattern.FindStringSubmatchIndex(m)
+		if loc == nil || loc[2] < 0 {
+			return m
+		}
+		kept := m[loc[2]:loc[3]]
+		trailing := strings.TrimSpace(m[loc[3]:])
+		if strings.HasPrefix(trailing, "-") || strings.HasPrefix(trailing, "/") {
+			return m // a following option, not a positional password
+		}
+		return kept + " [REDACTED]"
+	})
+
+	return secretArgPattern.ReplaceAllStringFunc(cmd, func(m string) string {
+		loc := secretArgPattern.FindStringSubmatchIndex(m)
+		if loc == nil || loc[2] < 0 {
+			return "[REDACTED]"
+		}
+		flag := m[loc[2]:loc[3]]
+		// Preserve the original separator (":" "=" or a space) for readability.
+		sep := strings.TrimSpace(m[loc[3]:])
+		switch {
+		case strings.HasPrefix(sep, ":"):
+			return flag + ":[REDACTED]"
+		case strings.HasPrefix(sep, "="):
+			return flag + "=[REDACTED]"
+		default:
+			return flag + " [REDACTED]"
+		}
+	})
 }
 
 // consumeSignals runs the chain extractor and narrator in response to scorer
@@ -313,17 +442,25 @@ func (p *Pipeline) runIntel(ctx context.Context, result types.ChainResultPayload
 
 // edgeUpdate ties a freshly appended edge to the destination node so we can
 // broadcast a meaningful graph_update payload (the new edge plus its newest
-// endpoint).
+// endpoint). authKind, when non-empty, tags an authentication edge with its
+// protocol so the scorer's auth-aware frequency term can bucket it; the
+// pipeline registers it via Scorer.SetAuthKind before scoring.
 type edgeUpdate struct {
-	node *types.Node
-	edge *types.Edge
+	node     *types.Node
+	edge     *types.Edge
+	authKind string
 }
 
-// parse dispatches to the per-source schema parser. Phase 1: Sysmon only.
+// parse dispatches to the per-source schema parser. Sysmon, Windows Security,
+// and AD audit are all wired into the live path.
 func parse(raw splunk.RawEvent) (any, error) {
 	switch raw.Kind {
 	case splunk.SourceSysmon:
 		return schema.ParseSysmon(raw.Raw)
+	case splunk.SourceWinsec:
+		return schema.ParseWinSec(raw.Raw)
+	case splunk.SourceADAudit:
+		return schema.ParseADAudit(raw.Raw)
 	default:
 		return nil, schema.ErrUnsupportedEvent
 	}
@@ -331,7 +468,13 @@ func parse(raw splunk.RawEvent) (any, error) {
 
 // materialize converts a typed event into one or more graph node+edge pairs.
 // Each returned edge has been appended to g; the caller is responsible for
-// scoring and broadcasting. Phase 1: Sysmon EID 1 (ProcessCreate) only.
+// scoring and broadcasting.
+//
+// Fully wired: Sysmon ProcessCreate (EID 1, spawned edge); Windows Security
+// logons (4624/4625/4672/4768/4769, authenticated_as edges); AD object changes
+// (4720/4728/4732/5136, accessed_credential edges from actor to principal).
+// Sysmon EID 3/10/11 and other WinSec/AD EIDs are parsed but not yet
+// materialized; see the per-event TODOs below.
 func materialize(g *graph.Graph, ev any) []edgeUpdate {
 	switch e := ev.(type) {
 	case types.ProcessCreate:
@@ -346,8 +489,149 @@ func materialize(g *graph.Graph, ev any) []edgeUpdate {
 		})
 		edge := g.AppendEdge(parent, child, types.EdgeKindSpawned, e.TS, 0, e.EventID)
 		return []edgeUpdate{{node: child, edge: edge}}
+
+	case types.LogonSuccess:
+		// 4624: a principal authenticated to a host. user -> host.
+		return []edgeUpdate{authEdge(g, e.TargetDomain, e.TargetUser, e.Host, e.TS, e.EventID, logonAuthKind(e.LogonType, e.AuthPackage))}
+
+	case types.LogonFailure:
+		// 4625: a failed authentication attempt. Still a user->host auth edge so
+		// brute-force fans show up in the graph; tagged "failed" for the scorer.
+		return []edgeUpdate{authEdge(g, e.TargetDomain, e.TargetUser, e.Host, e.TS, e.EventID, "failed")}
+
+	case types.SpecialLogon:
+		// 4672: privileged logon (admin-equivalent rights assigned at logon).
+		return []edgeUpdate{authEdge(g, e.SubjectDomain, e.SubjectUser, e.Host, e.TS, e.EventID, "privileged")}
+
+	case types.KerberosTGT:
+		// 4768: Kerberos TGT request. The DC issuing the ticket is the host.
+		return []edgeUpdate{authEdge(g, e.TargetDomain, e.TargetUser, e.Host, e.TS, e.EventID, "kerberos-tgt")}
+
+	case types.KerberosService:
+		// 4769: Kerberos service ticket request. user -> host (issuing DC).
+		return []edgeUpdate{authEdge(g, e.TargetDomain, e.TargetUser, e.Host, e.TS, e.EventID, "kerberos-service")}
+
+	case types.ADEvent:
+		return materializeADEvent(g, e)
 	}
+	// TODO: materialize Sysmon NetworkConnect (EID 3, NetFlow node +
+	// connected_to), ProcessAccess (EID 10, dumped_memory_of), and FileCreate
+	// (EID 11, read_file) once those node/edge models land.
 	return nil
+}
+
+// authEdge materializes a user->host authentication: a User node keyed by
+// domain\user and a Host node keyed by host, joined by an authenticated_as
+// edge. Both endpoints carry a "role" attr the scorer reads for its auth-aware
+// frequency term. Returns the edgeUpdate (destination node = the host) plus the
+// auth kind so the caller can register it with the scorer.
+func authEdge(g *graph.Graph, domain, user, host string, ts time.Time, eventID, authKind string) edgeUpdate {
+	userKey := principalKey(domain, user)
+	userNode := g.FindOrCreateNode(types.NodeKindUser, userKey, principalLabel(domain, user), map[string]any{
+		"role":   "user",
+		"domain": domain,
+	})
+	hostNode := g.FindOrCreateNode(types.NodeKindHost, host, host, map[string]any{
+		"role": "host",
+		"host": host,
+	})
+	edge := g.AppendEdge(userNode, hostNode, types.EdgeKindAuthenticatedAs, ts, 0, eventID)
+	return edgeUpdate{node: hostNode, edge: edge, authKind: authKind}
+}
+
+// materializeADEvent turns an AD object-change event into actor -> principal
+// edges. The acting account (Actor) is a User node; the affected principal
+// (a user account or a group) is a User node keyed by SID when available so
+// repeated touches of the same principal coalesce. The edge kind is
+// accessed_credential, the closest existing relationship for "an actor mutated
+// a security principal" (e.g. adding a backdoor account to Domain Admins).
+// TODO: add a dedicated AD-mutation edge kind to the graph package so creation,
+// membership, and attribute changes are distinguishable in the chain narrative.
+func materializeADEvent(g *graph.Graph, e types.ADEvent) []edgeUpdate {
+	if e.Actor == "" && e.Target == "" {
+		return nil
+	}
+	actor := g.FindOrCreateNode(types.NodeKindUser, principalKey(e.ActorDomain, e.Actor), principalLabel(e.ActorDomain, e.Actor), map[string]any{
+		"role":   "user",
+		"domain": e.ActorDomain,
+	})
+
+	switch e.Operation {
+	case "MemberAdded":
+		// Actor added Member to group Target. Model the security-relevant edge:
+		// the added member principal gains the group's privileges.
+		groupKey := e.TargetSID
+		if groupKey == "" {
+			groupKey = principalKey(e.TargetDomain, e.Target)
+		}
+		group := g.FindOrCreateNode(types.NodeKindUser, groupKey, e.Target, map[string]any{
+			"role":       "group",
+			"group_type": e.ObjectType,
+		})
+		var updates []edgeUpdate
+		updates = append(updates, edgeUpdate{node: group, edge: g.AppendEdge(actor, group, types.EdgeKindAccessedCredential, e.TS, 0, e.EventID)})
+		if e.Member != "" {
+			memberKey := e.MemberSID
+			if memberKey == "" {
+				memberKey = principalKey("", e.Member)
+			}
+			member := g.FindOrCreateNode(types.NodeKindUser, memberKey, e.Member, map[string]any{
+				"role": "user",
+			})
+			updates = append(updates, edgeUpdate{node: member, edge: g.AppendEdge(member, group, types.EdgeKindAccessedCredential, e.TS, 0, e.EventID)})
+		}
+		return updates
+
+	default:
+		// Created / Modified / other: actor acted on a target principal.
+		targetKey := e.TargetSID
+		if targetKey == "" {
+			targetKey = principalKey(e.TargetDomain, e.Target)
+		}
+		target := g.FindOrCreateNode(types.NodeKindUser, targetKey, e.Target, map[string]any{
+			"role": "user",
+		})
+		edge := g.AppendEdge(actor, target, types.EdgeKindAccessedCredential, e.TS, 0, e.EventID)
+		return []edgeUpdate{{node: target, edge: edge}}
+	}
+}
+
+// logonAuthKind derives a coarse auth-protocol tag for the scorer's auth-aware
+// frequency term from the Windows LogonType and authentication package.
+func logonAuthKind(logonType int, authPackage string) string {
+	switch logonType {
+	case 2:
+		return "interactive"
+	case 3:
+		return "network"
+	case 10:
+		return "remote-interactive"
+	}
+	if authPackage != "" {
+		return strings.ToLower(strings.TrimSpace(authPackage))
+	}
+	return "logon"
+}
+
+// principalKey builds a stable node key for a security principal. domain\user
+// when a domain is present (case-folded so DOMAIN\User and domain\user
+// coalesce), otherwise the bare name.
+func principalKey(domain, name string) string {
+	name = strings.TrimSpace(name)
+	domain = strings.TrimSpace(domain)
+	if domain != "" && domain != "-" {
+		return strings.ToLower(domain + "\\" + name)
+	}
+	return strings.ToLower(name)
+}
+
+// principalLabel is the human-readable label for a principal node.
+func principalLabel(domain, name string) string {
+	domain = strings.TrimSpace(domain)
+	if domain != "" && domain != "-" {
+		return domain + "\\" + name
+	}
+	return name
 }
 
 func processKey(host string, pid int) string {

@@ -11,10 +11,7 @@ import (
 // type-switch. Returns ErrUnsupportedEvent for recognized Windows Security
 // events the engine does not care about.
 func ParseWinSec(raw map[string]any) (any, error) {
-	eid := asString(raw, "EventID")
-	if eid == "" {
-		eid = asString(raw, "EventCode")
-	}
+	eid := firstField(raw, "EventID", "EventCode", "event_id", "signature_id")
 	switch eid {
 	case "4624":
 		return ParseLogonSuccess(raw)
@@ -38,7 +35,7 @@ func ParseLogonSuccess(raw map[string]any) (types.LogonSuccess, error) {
 	if err != nil {
 		return types.LogonSuccess{}, err
 	}
-	logonType, err := asInt(raw, "LogonType")
+	logonType, err := firstInt(raw, "LogonType", "Logon_Type", "logon_type")
 	if err != nil {
 		return types.LogonSuccess{}, fmt.Errorf("LogonSuccess: %w", err)
 	}
@@ -46,19 +43,19 @@ func ParseLogonSuccess(raw map[string]any) (types.LogonSuccess, error) {
 		EventID:        eventID(raw),
 		TS:             ts,
 		Host:           hostFrom(raw),
-		TargetUser:     asString(raw, "TargetUserName"),
-		TargetDomain:   asString(raw, "TargetDomainName"),
-		TargetSID:      asString(raw, "TargetUserSid"),
-		TargetLogonID:  asString(raw, "TargetLogonId"),
+		TargetUser:     firstField(raw, "TargetUserName", "user", "Account_Name", "Target_Account_Name"),
+		TargetDomain:   firstField(raw, "TargetDomainName", "Target_Domain"),
+		TargetSID:      firstField(raw, "TargetUserSid", "user_id"),
+		TargetLogonID:  firstField(raw, "TargetLogonId"),
 		LogonType:      logonType,
-		LogonProcess:   asString(raw, "LogonProcessName"),
-		AuthPackage:    asString(raw, "AuthenticationPackageName"),
-		Workstation:    asString(raw, "WorkstationName"),
-		IPAddress:      asString(raw, "IpAddress"),
-		IPPort:         asIntOpt(raw, "IpPort"),
-		SubjectUser:    asString(raw, "SubjectUserName"),
-		SubjectDomain:  asString(raw, "SubjectDomainName"),
-		SubjectLogonID: asString(raw, "SubjectLogonId"),
+		LogonProcess:   firstField(raw, "LogonProcessName"),
+		AuthPackage:    firstField(raw, "AuthenticationPackageName"),
+		Workstation:    firstField(raw, "WorkstationName", "src_nt_host"),
+		IPAddress:      firstField(raw, "IpAddress", "src_ip", "src"),
+		IPPort:         firstIntOpt(raw, "IpPort", "src_port"),
+		SubjectUser:    firstField(raw, "SubjectUserName"),
+		SubjectDomain:  firstField(raw, "SubjectDomainName"),
+		SubjectLogonID: firstField(raw, "SubjectLogonId"),
 	}, nil
 }
 
@@ -67,7 +64,7 @@ func ParseLogonFailure(raw map[string]any) (types.LogonFailure, error) {
 	if err != nil {
 		return types.LogonFailure{}, err
 	}
-	logonType, err := asInt(raw, "LogonType")
+	logonType, err := firstInt(raw, "LogonType", "Logon_Type", "logon_type")
 	if err != nil {
 		return types.LogonFailure{}, fmt.Errorf("LogonFailure: %w", err)
 	}
@@ -75,17 +72,17 @@ func ParseLogonFailure(raw map[string]any) (types.LogonFailure, error) {
 		EventID:       eventID(raw),
 		TS:            ts,
 		Host:          hostFrom(raw),
-		TargetUser:    asString(raw, "TargetUserName"),
-		TargetDomain:  asString(raw, "TargetDomainName"),
+		TargetUser:    firstField(raw, "TargetUserName", "user", "Account_Name"),
+		TargetDomain:  firstField(raw, "TargetDomainName"),
 		LogonType:     logonType,
-		Status:        asString(raw, "Status"),
-		SubStatus:     asString(raw, "SubStatus"),
-		FailureReason: asString(raw, "FailureReason"),
-		Workstation:   asString(raw, "WorkstationName"),
-		IPAddress:     asString(raw, "IpAddress"),
-		IPPort:        asIntOpt(raw, "IpPort"),
-		SubjectUser:   asString(raw, "SubjectUserName"),
-		SubjectDomain: asString(raw, "SubjectDomainName"),
+		Status:        firstField(raw, "Status"),
+		SubStatus:     firstField(raw, "SubStatus"),
+		FailureReason: firstField(raw, "FailureReason"),
+		Workstation:   firstField(raw, "WorkstationName", "src_nt_host"),
+		IPAddress:     firstField(raw, "IpAddress", "src_ip", "src"),
+		IPPort:        firstIntOpt(raw, "IpPort", "src_port"),
+		SubjectUser:   firstField(raw, "SubjectUserName"),
+		SubjectDomain: firstField(raw, "SubjectDomainName"),
 	}, nil
 }
 
@@ -98,11 +95,11 @@ func ParseSpecialLogon(raw map[string]any) (types.SpecialLogon, error) {
 		EventID:        eventID(raw),
 		TS:             ts,
 		Host:           hostFrom(raw),
-		SubjectUser:    asString(raw, "SubjectUserName"),
-		SubjectDomain:  asString(raw, "SubjectDomainName"),
-		SubjectSID:     asString(raw, "SubjectUserSid"),
-		SubjectLogonID: asString(raw, "SubjectLogonId"),
-		Privileges:     asString(raw, "PrivilegeList"),
+		SubjectUser:    firstField(raw, "SubjectUserName", "user", "Account_Name"),
+		SubjectDomain:  firstField(raw, "SubjectDomainName"),
+		SubjectSID:     firstField(raw, "SubjectUserSid", "user_id"),
+		SubjectLogonID: firstField(raw, "SubjectLogonId"),
+		Privileges:     firstField(raw, "PrivilegeList", "Privileges"),
 	}, nil
 }
 
@@ -115,16 +112,16 @@ func ParseKerberosTGT(raw map[string]any) (types.KerberosTGT, error) {
 		EventID:          eventID(raw),
 		TS:               ts,
 		Host:             hostFrom(raw),
-		TargetUser:       asString(raw, "TargetUserName"),
-		TargetDomain:     asString(raw, "TargetDomainName"),
-		TargetSID:        asString(raw, "TargetSid"),
-		ServiceName:      asString(raw, "ServiceName"),
-		IPAddress:        asString(raw, "IpAddress"),
-		IPPort:           asIntOpt(raw, "IpPort"),
-		Status:           asString(raw, "Status"),
-		TicketOptions:    asString(raw, "TicketOptions"),
-		TicketEncryption: asString(raw, "TicketEncryptionType"),
-		PreAuthType:      asString(raw, "PreAuthType"),
+		TargetUser:       firstField(raw, "TargetUserName", "user", "Account_Name"),
+		TargetDomain:     firstField(raw, "TargetDomainName"),
+		TargetSID:        firstField(raw, "TargetSid", "user_id"),
+		ServiceName:      firstField(raw, "ServiceName"),
+		IPAddress:        firstField(raw, "IpAddress", "src_ip", "src"),
+		IPPort:           firstIntOpt(raw, "IpPort", "src_port"),
+		Status:           firstField(raw, "Status"),
+		TicketOptions:    firstField(raw, "TicketOptions"),
+		TicketEncryption: firstField(raw, "TicketEncryptionType"),
+		PreAuthType:      firstField(raw, "PreAuthType"),
 	}, nil
 }
 
@@ -137,14 +134,14 @@ func ParseKerberosService(raw map[string]any) (types.KerberosService, error) {
 		EventID:          eventID(raw),
 		TS:               ts,
 		Host:             hostFrom(raw),
-		TargetUser:       asString(raw, "TargetUserName"),
-		TargetDomain:     asString(raw, "TargetDomainName"),
-		ServiceName:      asString(raw, "ServiceName"),
-		ServiceSID:       asString(raw, "ServiceSid"),
-		IPAddress:        asString(raw, "IpAddress"),
-		IPPort:           asIntOpt(raw, "IpPort"),
-		Status:           asString(raw, "Status"),
-		TicketOptions:    asString(raw, "TicketOptions"),
-		TicketEncryption: asString(raw, "TicketEncryptionType"),
+		TargetUser:       firstField(raw, "TargetUserName", "user", "Account_Name"),
+		TargetDomain:     firstField(raw, "TargetDomainName"),
+		ServiceName:      firstField(raw, "ServiceName"),
+		ServiceSID:       firstField(raw, "ServiceSid"),
+		IPAddress:        firstField(raw, "IpAddress", "src_ip", "src"),
+		IPPort:           firstIntOpt(raw, "IpPort", "src_port"),
+		Status:           firstField(raw, "Status"),
+		TicketOptions:    firstField(raw, "TicketOptions"),
+		TicketEncryption: firstField(raw, "TicketEncryptionType"),
 	}, nil
 }
