@@ -593,6 +593,11 @@ export function GraphView({
   const addedEdgeIds = useRef(new Set<string>())
   const labelBand = useRef<LabelClass>('labels-faint')
   const firstBatch = useRef(true)
+  // Set when an add batch had to lay out into a zero-size container (the page
+  // had not given the canvas its dimensions yet). The resize effect below
+  // re-seeds, refits, and restarts cola once the container has real size, so
+  // the initial graph never renders collapsed on top of itself.
+  const pendingResettle = useRef(false)
   const [edgeTooltip, setEdgeTooltip] = useState<EdgeTooltip | null>(null)
   const [mini, setMini] = useState<MinimapData | null>(null)
   // Minimap size tracks the graph panel (and therefore the screen): a fixed
@@ -703,6 +708,35 @@ export function GraphView({
     }
     setGlows(next)
   }, [])
+
+  // Resettle the initial layout once the canvas has real dimensions. The first
+  // add batch can arrive before the page has sized the graph panel; cola then
+  // seeds and fits into a zero-size viewport and the graph renders jumbled.
+  // When the container gains real size, refit and restart the continuous cola
+  // run once so the opening graph spreads deterministically.
+  useEffect(() => {
+    const el = containerRef.current
+    if (!el || typeof ResizeObserver === 'undefined') return
+    const resettle = () => {
+      const cy = cyRef.current
+      if (!cy || !pendingResettle.current) return
+      if (el.clientWidth === 0 || el.clientHeight === 0) return
+      pendingResettle.current = false
+      cy.resize()
+      cy.fit(cy.elements(), 60)
+      if (cy.zoom() > 1.1) {
+        cy.zoom(1.1)
+        cy.center(cy.elements())
+      }
+      layoutRef.current?.stop()
+      layoutRef.current = cy.layout(COLA_OPTIONS as unknown as cytoscape.LayoutOptions)
+      layoutRef.current.run()
+      recomputeMini()
+    }
+    const ro = new ResizeObserver(resettle)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [recomputeMini])
 
   // Auto-snap: once the user stops panning (canvas drag or minimap jump),
   // frame the nearest incident's whole graph. The user's zoom is kept
@@ -992,7 +1026,13 @@ export function GraphView({
         const bb = cy.elements().boundingBox({})
         return { x: bb.x2 + 280 + jitter(), y: (bb.y1 + bb.y2) / 2 + jitter() }
       }
-      return { x: cy.width() / 2 + jitter(), y: cy.height() / 2 + jitter() }
+      // First disconnected node of the first batch. If the page has not sized
+      // the canvas yet, cy.width()/height() are 0 and centering here would
+      // stack the whole batch on the origin; fall back to a nominal canvas so
+      // they still spread, and the resize effect refits once size arrives.
+      const cw = cy.width() || 800
+      const ch = cy.height() || 600
+      return { x: cw / 2 + jitter(), y: ch / 2 + jitter() }
     }
 
     for (const n of nodes) {
@@ -1062,6 +1102,10 @@ export function GraphView({
     }
     if (firstBatch.current) {
       firstBatch.current = false
+      // If the canvas has no size yet, fit math is degenerate and the seeded
+      // positions are nominal; flag a resettle so the resize effect refits and
+      // restarts the layout the moment the container gets real dimensions.
+      if (cy.width() === 0 || cy.height() === 0) pendingResettle.current = true
       clampedFit()
     } else {
       const ext = cy.extent()
