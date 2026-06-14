@@ -99,9 +99,13 @@
 
 /* ─── Main layout ─────────────────────────────────────────────────────── */
 
+/* The dashboard is split by ratio, not by fixed pixels, so the same
+   proportions hold at every screen size. The graph row and the detail
+   tabs below it share the space 11:3 (the proportion measured from the
+   reference layout), keeping the graph the dominant section. */
 .app-main {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-rows: 11fr 3fr;
   flex: 1;
   min-height: 0;
   gap: var(--space-2);
@@ -130,9 +134,14 @@
   z-index: 1;
 }
 
+/* Three columns sharing the row by ratio: incidents rail, provenance graph,
+   attack-phases rail (roughly 8:77:15, measured from the reference layout).
+   fr tracks keep those proportions identical from a small laptop to a wide
+   external display; min-height:0 lets the panels scroll instead of stretching
+   the row. */
 .app-main-row {
-  display: flex;
-  flex: 1;
+  display: grid;
+  grid-template-columns: 8fr 77fr 15fr;
   min-height: 0;
   gap: var(--space-2);
 }
@@ -186,7 +195,6 @@
 /* ─── Per-panel accent colors ─────────────────────────────────────────── */
 
 .graph-pane {
-  flex: 1;
   min-width: 0;
   --panel-accent: var(--panel-graph);
 }
@@ -210,8 +218,7 @@
 }
 
 .narration-pane {
-  width: 360px;
-  flex-shrink: 0;
+  min-width: 0;
   --panel-accent: var(--panel-narration);
 }
 
@@ -1897,9 +1904,10 @@
 
 /* ─── Detail tabs ─────────────────────────────────────────────────────── */
 
+/* Height comes from the app-main grid's 3fr bottom row, so the logs section
+   scales with the viewport instead of staying a fixed 260px. */
 .detail-tabs {
-  height: 260px;
-  flex-shrink: 0;
+  min-height: 0;
 }
 
 .detail-tabs-header {
@@ -2461,9 +2469,8 @@ button.intel-technique-head-link:hover .intel-technique-name {
   color: var(--text-faint);
 }
 
-/* Incident switcher rail */
+/* Incident switcher rail. Width comes from the parent grid's ratio columns. */
 .incident-pane {
-  flex: 0 0 200px;
   min-width: 0;
 }
 
