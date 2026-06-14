@@ -28,13 +28,9 @@ Unravel does that stitching continuously and automatically. As events stream out
 
 ## The one design decision everything hangs on
 
-**Engine first, AI second.**
-
 Seven subcomponents do the work. Six of them are pure Go with zero LLM calls: ingest, schema mapping, graph construction, temporal indexing, suspicion scoring, and chain extraction. The seventh, the narrator, is the only place an LLM is allowed to touch anything.
 
 We took this seriously enough to ship a switch that proves it. Run the engine with `--mode=ai-off` and the whole pipeline still ingests, builds the graph, scores it, and extracts the attack chain. You lose the English narration and nothing else. The intelligence is in the data structures, not the prompt.
-
-That matters for a security tool. An analyst can audit a backward graph walk. They cannot audit a model's vibe.
 
 ## What it reconstructs
 
@@ -64,7 +60,7 @@ Events flow left to right through seven stages. Only the last one calls a model.
 | 6 | **Chain extractor** | When a component crosses the threshold, walks backward from the hottest node along highest-scored edges to recover the maximally suspicious path, then reverses it into chronological order with per-step confidence | No |
 | 7 | **AI narrator** | Turns the extracted chain into a 2–4 sentence narrative, missing-evidence hypotheses, and ranked containment actions | **Yes** |
 
-The graph lives in a custom in-memory adjacency structure (the graph engine *is* the project, so judges read our data structures, not Neo4j calls) and snapshots periodically to BadgerDB. Findings flow back into Splunk as notable events over HEC when you point it at a `--hec-url`. The whole thing ships as one static Go binary with the React UI embedded inside it.
+The graph lives in a custom in-memory adjacency structure and snapshots periodically to BadgerDB. Findings flow back into Splunk as notable events over HEC when you point it at a `--hec-url`. The whole thing ships as one static Go binary with the React UI embedded inside it.
 
 ## How the AI is used
 
@@ -80,7 +76,7 @@ Two agents sit at the seam, both built on Claude Sonnet 4.6 with the static syst
 
 The important part: the model only enriches its *own* input. It never decides what the attack chain is. That decision was already made by the Go engine before the first token was generated. And if you have no API key, the narrator falls back to a deterministic stub and the intel agent falls back to a bundled ATT&CK snapshot, so every tab in the UI still works with zero keys.
 
-## Quickstart (no Splunk, no lab, no API key)
+## Quickstart
 
 You don't need a Splunk instance or a virtual lab to see the whole thing run. Replay mode feeds a canned kill chain through the real pipeline.
 
@@ -127,20 +123,12 @@ When MCP enrichment is enabled, the narrator can also call `splunk_nl_search`: i
 
 `--insecure` skips TLS verification for the self-signed certs that GOAD and most lab Splunk installs use. Drop it for an instance with a CA-signed certificate. The `--hec-*` flags are optional; leave them off and the engine simply won't write findings back to Splunk.
 
-## The lab
-
-`lab/` stands up a small Active Directory environment so you can generate the real telemetry yourself instead of replaying it.
-
-- **`lab/topology/`** — a Vagrant + Ansible GOAD-lite topology: a Windows Server 2019 Domain Controller, a Windows 10 workstation, and a Kali attacker box on an isolated `northpole.local` domain. The playbooks promote the DC, create demo users, turn on the relevant audit policies, and install the Splunk Universal Forwarder on the Windows hosts.
-- **`lab/splunk/`** — `inputs.conf` / `outputs.conf` for the forwarders: the exact Sysmon, Windows Security, and AD channels Unravel consumes, shipped to your indexer.
-- **`lab/attack-runner/`** — `run.py` drives the five-step kill chain from `atomics.yaml` (Atomic Red Team) on a timer, so the demo is reproducible. `--speed instant` for CI, `--speed normal` for recording.
-
 ## Tech stack
 
 | Layer | Choice | Why |
 |-------|--------|-----|
 | Engine | Go 1.25 | Real concurrency for streaming, a single static binary, and source that judges can actually read |
-| Graph store | Custom in-memory adjacency + BadgerDB snapshots | The graph is the product; we didn't want to hide it behind a database |
+| Graph store | Custom in-memory adjacency + BadgerDB snapshots | In-process and directly inspectable, with periodic snapshots for durability |
 | Splunk read | REST `search/jobs/export` tail | Splunk-native, no Kafka, no extra moving parts |
 | Splunk write-back | HEC | Findings return to Splunk as notable events |
 | Transport | `gorilla/websocket` | Mature, boring, reliable |
@@ -148,7 +136,6 @@ When MCP enrichment is enabled, the narrator can also call `splunk_nl_search`: i
 | Graph view | Cytoscape.js + Cola layout | Animates well and holds up under a live demo |
 | Models | Claude Sonnet 4.6, prompt caching | Good cost/latency for a handful of call-sites; static schema preamble cached |
 | Threat intel | CISA KEV + NVD | Live external enrichment, with a bundled snapshot as the offline fallback |
-| Lab | GOAD-lite (Vagrant + Ansible) + Atomic Red Team | A reproducible AD attack on demand |
 
 ## The UI
 
@@ -194,10 +181,8 @@ The front end (React + Cytoscape.js, embedded in the engine binary) is built to 
 │       ├── api/                      HTTP + WebSocket server, broadcaster, embedded UI
 │       └── pipeline/                 wires it all into the streaming loop
 │
-├── ui/                               React + Vite + TypeScript front end
-│   └── src/                          graph view, panels, time scrubber, incident map, ws client
-│
-└── lab/                              GOAD-lite topology + Splunk forwarders + attack runner
+└── ui/                               React + Vite + TypeScript front end
+    └── src/                          graph view, panels, time scrubber, incident map, ws client
 ```
 
 ## Team
