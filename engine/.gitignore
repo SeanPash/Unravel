@@ -1,2 +1,4 @@
 # Compiled engine binary (build artifact from `go build` / `make release`)
 /engine
+# Ad-hoc compiled binary (e.g. `go build -o engine-fresh`)
+/engine-fresh
