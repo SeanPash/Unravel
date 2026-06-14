@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { WsEdge, ChainResultPayload, ChainStep } from './ws'
 import { nodeForEvent } from './logFilter'
 import {
@@ -174,10 +174,15 @@ export function TimeScrubber({ minTs, maxTs, window, onChange, edges, chain, onE
   function togglePlay() {
     if (!playing) {
       clearSelection()
-      // Starting at or past the end of the rail (e.g. from Live) restarts
-      // the playback from the beginning of the visible range.
+      // clearSelection releases the event focus, which the host treats as a
+      // return to Live and nulls the window. Re-assert the play window so it
+      // survives that: a press at or past the last event (which includes Live)
+      // restarts from the beginning of the visible range; a press after
+      // scrubbing back to a marker resumes forward from that point rather than
+      // snapping to the live end.
       const base = window ? window[1] : maxTs
-      if (timestamps.length > 0 && base >= dispMax) onChange([minTs, dispMin])
+      if (timestamps.length > 0 && base >= lastTs) onChange([minTs, dispMin])
+      else onChange([minTs, base])
     }
     setPlaying(p => !p)
   }
@@ -229,28 +234,40 @@ export function TimeScrubber({ minTs, maxTs, window, onChange, edges, chain, onE
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [jump?.seq])
 
-  // Playback auto-advances to the next event, takes one final step to the
-  // end of the rail, and pauses there. The effect re-runs on `window` change
-  // because each step depends on the current upper bound; clearInterval
-  // covers both unmount and toggle-off.
+  // The graph streams while playback runs, so the parent re-renders on every
+  // tick: `onChange` gets a new identity (it is an inline arrow), and `window`,
+  // `maxTs`, `timestamps`, and `lastTs` all shift as edges arrive. If the
+  // playback interval depended on any of those, every stream re-render would
+  // clearInterval/setInterval and restart the dwell from 0ms, so it would
+  // never fire its PLAY_INTERVAL_MS step. Keep the live values in refs and run
+  // a single interval keyed only on `playing`, reading the refs on each tick.
+  const playStateRef = useRef({ window, maxTs, minTs, timestamps, lastTs, onChange })
+  playStateRef.current = { window, maxTs, minTs, timestamps, lastTs, onChange }
+
+  // Playback auto-advances one event per tick from the current position.
+  // When it reaches the last event it hands the timeline back to Live and
+  // stops, so the play head only goes live once it has run to the end. The
+  // interval is created once per play/pause toggle; clearInterval covers both
+  // unmount and toggle-off.
   useEffect(() => {
     if (!playing) return
     const id = setInterval(() => {
-      const base = window ? window[1] : maxTs
-      const last = timestamps.length > 0 ? timestamps[timestamps.length - 1] : dispMax
-      if (timestamps.length === 0 || base >= dispMax) {
+      const s = playStateRef.current
+      const base = s.window ? s.window[1] : s.maxTs
+      if (s.timestamps.length === 0) {
         setPlaying(false)
         return
       }
-      if (base >= last) {
-        onChange([minTs, dispMax])
+      // At or past the last event: the run is over, return to Live.
+      if (base >= s.lastTs) {
+        s.onChange(null)
         setPlaying(false)
         return
       }
-      onChange([minTs, stepTs(timestamps, base, 'next')])
+      s.onChange([s.minTs, stepTs(s.timestamps, base, 'next')])
     }, PLAY_INTERVAL_MS)
     return () => clearInterval(id)
-  }, [playing, window, timestamps, minTs, maxTs, dispMax, onChange])
+  }, [playing])
 
   const selectedStep = selectedTs !== null ? stepsByTs.get(selectedTs) : undefined
   const selectedEdge = selectedTs !== null ? bestEdgeAt(edges, selectedTs) : null
