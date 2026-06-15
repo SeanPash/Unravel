@@ -14,6 +14,22 @@ import (
 	"github.com/luigifernandez/unravel/engine/internal/types"
 )
 
+// geminiTextResp builds a Gemini response whose single candidate returns text.
+func geminiTextResp(text string) geminiResponse {
+	return geminiResponse{Candidates: []geminiCandidate{{Content: geminiContent{
+		Role:  "model",
+		Parts: []geminiPart{{Text: text}},
+	}}}}
+}
+
+// geminiCallResp builds a Gemini response with a single functionCall part.
+func geminiCallResp(name string, args map[string]any) geminiResponse {
+	return geminiResponse{Candidates: []geminiCandidate{{Content: geminiContent{
+		Role:  "model",
+		Parts: []geminiPart{{FunctionCall: &geminiFunctionCall{Name: name, Args: args}}},
+	}}}}
+}
+
 func TestStubNarratorIncludesEveryStep(t *testing.T) {
 	t.Parallel()
 	n := NewStub()
@@ -33,48 +49,37 @@ func TestStubNarratorIncludesEveryStep(t *testing.T) {
 			t.Errorf("stub text missing step %q: %s", s.Description, got.Text)
 		}
 	}
+	if len(got.Actions) == 0 {
+		t.Error("stub should emit at least one structured action")
+	}
 }
 
-func TestClaudeNarratorSendsCachedSystemPrompt(t *testing.T) {
+func TestGeminiNarratorSendsSystemInstruction(t *testing.T) {
 	t.Parallel()
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v1/messages" {
-			t.Errorf("path = %s", r.URL.Path)
+		if !strings.Contains(r.URL.Path, ":generateContent") {
+			t.Errorf("path = %s, want generateContent endpoint", r.URL.Path)
 		}
-		if got := r.Header.Get("x-api-key"); got != "test-key" {
+		if got := r.Header.Get("x-goog-api-key"); got != "test-key" {
 			t.Errorf("api key = %q", got)
 		}
-		if got := r.Header.Get("anthropic-version"); got == "" {
-			t.Error("missing anthropic-version header")
-		}
-		var req claudeRequest
+		var req geminiRequest
 		body, _ := io.ReadAll(r.Body)
 		if err := json.Unmarshal(body, &req); err != nil {
 			t.Fatalf("decode request: %v", err)
 		}
-		if len(req.System) != 1 {
-			t.Fatalf("system blocks = %d", len(req.System))
+		if req.SystemInstruction == nil || len(req.SystemInstruction.Parts) != 1 {
+			t.Fatalf("missing system instruction: %+v", req.SystemInstruction)
 		}
-		if req.System[0].CacheControl == nil || req.System[0].CacheControl.Type != "ephemeral" {
-			t.Errorf("missing ephemeral cache_control: %+v", req.System[0].CacheControl)
-		}
-		if !strings.Contains(req.System[0].Text, "JSON object") {
+		if !strings.Contains(req.SystemInstruction.Parts[0].Text, "JSON object") {
 			t.Errorf("system prompt missing schema instructions")
 		}
-		resp := claudeResponse{
-			Content: []claudeContentBlock{
-				{Type: "text", Text: `{"text":"Attack chain summary.","hypotheses":["More hosts touched"],"actions":["Isolate WS01"]}`},
-			},
-		}
-		_ = json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(geminiTextResp(`{"text":"Attack chain summary.","severity":"high","key_findings":["LSASS read"],"affected_assets":["WS01"],"hypotheses":["More hosts touched"],"actions":[{"priority":"immediate","action":"Isolate WS01","rationale":"entry point"}]}`))
 	}))
 	defer srv.Close()
 
-	n := NewClaude(ClaudeConfig{
-		APIKey:  "test-key",
-		BaseURL: srv.URL,
-	})
+	n := NewGemini(GeminiConfig{APIKey: "test-key", BaseURL: srv.URL})
 	got, err := n.Narrate(context.Background(), types.ChainResultPayload{
 		Confidence: 0.91,
 		Steps:      []types.ChainStep{{Description: "winword spawned powershell", Confidence: 0.9, TS: 1}},
@@ -85,23 +90,23 @@ func TestClaudeNarratorSendsCachedSystemPrompt(t *testing.T) {
 	if got.Text != "Attack chain summary." {
 		t.Errorf("text = %q", got.Text)
 	}
-	if len(got.Actions) != 1 || got.Actions[0] != "Isolate WS01" {
+	if got.Severity != "high" {
+		t.Errorf("severity = %q", got.Severity)
+	}
+	if len(got.Actions) != 1 || got.Actions[0].Action != "Isolate WS01" {
 		t.Errorf("actions = %v", got.Actions)
 	}
 }
 
-func TestClaudeNarratorParsesCodeFence(t *testing.T) {
+func TestGeminiNarratorParsesCodeFence(t *testing.T) {
 	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		fenced := "```json\n{\"text\":\"ok\",\"hypotheses\":[],\"actions\":[]}\n```"
-		resp := claudeResponse{
-			Content: []claudeContentBlock{{Type: "text", Text: fenced}},
-		}
-		_ = json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(geminiTextResp(fenced))
 	}))
 	defer srv.Close()
 
-	n := NewClaude(ClaudeConfig{APIKey: "k", BaseURL: srv.URL})
+	n := NewGemini(GeminiConfig{APIKey: "k", BaseURL: srv.URL})
 	got, err := n.Narrate(context.Background(), types.ChainResultPayload{}, nil)
 	if err != nil {
 		t.Fatalf("narrate: %v", err)
@@ -111,13 +116,13 @@ func TestClaudeNarratorParsesCodeFence(t *testing.T) {
 	}
 }
 
-func TestClaudeNarratorReturnsErrorOnNon2xx(t *testing.T) {
+func TestGeminiNarratorReturnsErrorOnNon2xx(t *testing.T) {
 	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		http.Error(w, "rate limit", http.StatusTooManyRequests)
 	}))
 	defer srv.Close()
-	n := NewClaude(ClaudeConfig{APIKey: "k", BaseURL: srv.URL})
+	n := NewGemini(GeminiConfig{APIKey: "k", BaseURL: srv.URL})
 	if _, err := n.Narrate(context.Background(), types.ChainResultPayload{}, nil); err == nil {
 		t.Fatal("want error on 429, got nil")
 	}
@@ -136,7 +141,7 @@ func (f *fakeSearcher) Search(ctx context.Context, query string) ([]map[string]a
 func TestDispatchToolLookupProcessReputation(t *testing.T) {
 	t.Parallel()
 	var gotQuery string
-	n := NewClaude(ClaudeConfig{
+	n := NewGemini(GeminiConfig{
 		APIKey: "k",
 		Searcher: &fakeSearcher{fn: func(_ context.Context, q string) ([]map[string]any, error) {
 			gotQuery = q
@@ -158,7 +163,7 @@ func TestDispatchToolLookupProcessReputation(t *testing.T) {
 func TestDispatchToolGetAccountLogonHistory(t *testing.T) {
 	t.Parallel()
 	var gotQuery string
-	n := NewClaude(ClaudeConfig{
+	n := NewGemini(GeminiConfig{
 		APIKey: "k",
 		Searcher: &fakeSearcher{fn: func(_ context.Context, q string) ([]map[string]any, error) {
 			gotQuery = q
@@ -180,7 +185,7 @@ func TestDispatchToolGetAccountLogonHistory(t *testing.T) {
 func TestDispatchToolFetchRawEvents(t *testing.T) {
 	t.Parallel()
 	var gotQuery string
-	n := NewClaude(ClaudeConfig{
+	n := NewGemini(GeminiConfig{
 		APIKey: "k",
 		Searcher: &fakeSearcher{fn: func(_ context.Context, q string) ([]map[string]any, error) {
 			gotQuery = q
@@ -201,7 +206,7 @@ func TestDispatchToolFetchRawEvents(t *testing.T) {
 
 func TestDispatchToolSearchError(t *testing.T) {
 	t.Parallel()
-	n := NewClaude(ClaudeConfig{
+	n := NewGemini(GeminiConfig{
 		APIKey: "k",
 		Searcher: &fakeSearcher{fn: func(_ context.Context, _ string) ([]map[string]any, error) {
 			return nil, fmt.Errorf("splunk unavailable")
@@ -213,41 +218,31 @@ func TestDispatchToolSearchError(t *testing.T) {
 	}
 }
 
-func TestClaudeNarratorToolUseLoop(t *testing.T) {
+func TestGeminiNarratorToolUseLoop(t *testing.T) {
 	t.Parallel()
 	var callCount atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		callCount.Add(1)
-		var reqBody claudeRequest
+		var reqBody geminiRequest
 		body, _ := io.ReadAll(r.Body)
 		if err := json.Unmarshal(body, &reqBody); err != nil {
 			t.Fatalf("decode request: %v", err)
 		}
 		if callCount.Load() == 1 {
-			if len(reqBody.Tools) != 4 {
-				t.Errorf("tools = %d, want 4", len(reqBody.Tools))
+			if len(reqBody.Tools) != 1 || len(reqBody.Tools[0].FunctionDeclarations) != 4 {
+				t.Errorf("tools = %+v, want 1 tool with 4 declarations", reqBody.Tools)
 			}
-			_ = json.NewEncoder(w).Encode(claudeResponse{
-				StopReason: "tool_use",
-				Content: []claudeContentBlock{
-					{Type: "tool_use", ID: "tu_1", Name: "lookup_process_reputation", Input: map[string]any{"name": "lsass.exe"}},
-				},
-			})
+			_ = json.NewEncoder(w).Encode(geminiCallResp("lookup_process_reputation", map[string]any{"name": "lsass.exe"}))
 		} else {
-			if len(reqBody.Messages) < 3 {
-				t.Errorf("messages on round 2 = %d, want >= 3", len(reqBody.Messages))
+			if len(reqBody.Contents) < 3 {
+				t.Errorf("contents on round 2 = %d, want >= 3", len(reqBody.Contents))
 			}
-			_ = json.NewEncoder(w).Encode(claudeResponse{
-				StopReason: "end_turn",
-				Content: []claudeContentBlock{
-					{Type: "text", Text: `{"text":"Attack used lsass.exe (malicious).","hypotheses":["More hosts compromised"],"actions":["Isolate WS01"]}`},
-				},
-			})
+			_ = json.NewEncoder(w).Encode(geminiTextResp(`{"text":"Attack used lsass.exe (malicious).","hypotheses":["More hosts compromised"],"actions":[{"priority":"immediate","action":"Isolate WS01","rationale":"r"}]}`))
 		}
 	}))
 	defer srv.Close()
 
-	n := NewClaude(ClaudeConfig{
+	n := NewGemini(GeminiConfig{
 		APIKey:  "test-key",
 		BaseURL: srv.URL,
 		Searcher: &fakeSearcher{fn: func(_ context.Context, _ string) ([]map[string]any, error) {
@@ -269,30 +264,20 @@ func TestClaudeNarratorToolUseLoop(t *testing.T) {
 	}
 }
 
-func TestClaudeNarratorEmitsActivity(t *testing.T) {
+func TestGeminiNarratorEmitsActivity(t *testing.T) {
 	t.Parallel()
 	var callCount atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		callCount.Add(1)
 		if callCount.Load() == 1 {
-			_ = json.NewEncoder(w).Encode(claudeResponse{
-				StopReason: "tool_use",
-				Content: []claudeContentBlock{
-					{Type: "tool_use", ID: "tu_1", Name: "lookup_process_reputation", Input: map[string]any{"name": "lsass.exe"}},
-				},
-			})
+			_ = json.NewEncoder(w).Encode(geminiCallResp("lookup_process_reputation", map[string]any{"name": "lsass.exe"}))
 			return
 		}
-		_ = json.NewEncoder(w).Encode(claudeResponse{
-			StopReason: "end_turn",
-			Content: []claudeContentBlock{
-				{Type: "text", Text: `{"text":"done.","hypotheses":[],"actions":[]}`},
-			},
-		})
+		_ = json.NewEncoder(w).Encode(geminiTextResp(`{"text":"done.","hypotheses":[],"actions":[]}`))
 	}))
 	defer srv.Close()
 
-	n := NewClaude(ClaudeConfig{
+	n := NewGemini(GeminiConfig{
 		APIKey:  "k",
 		BaseURL: srv.URL,
 		Searcher: &fakeSearcher{fn: func(_ context.Context, _ string) ([]map[string]any, error) {
@@ -312,7 +297,6 @@ func TestClaudeNarratorEmitsActivity(t *testing.T) {
 	if got[0].Kind != "tool_call" || got[0].Tool != "lookup_process_reputation" {
 		t.Errorf("step 0 = %+v, want tool_call lookup_process_reputation", got[0])
 	}
-	// The source must be the honest local-Splunk label, not "external".
 	if got[0].Source != "Splunk threat_intel index" {
 		t.Errorf("step 0 source = %q, want %q", got[0].Source, "Splunk threat_intel index")
 	}
@@ -327,63 +311,48 @@ func TestClaudeNarratorEmitsActivity(t *testing.T) {
 	}
 }
 
-func TestClaudeNarratorNoSearcherSkipsTools(t *testing.T) {
+func TestGeminiNarratorNoSearcherSkipsTools(t *testing.T) {
 	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var reqBody claudeRequest
+		var reqBody geminiRequest
 		body, _ := io.ReadAll(r.Body)
 		_ = json.Unmarshal(body, &reqBody)
 		if len(reqBody.Tools) != 0 {
 			t.Errorf("tools = %d, want 0 when Searcher is nil", len(reqBody.Tools))
 		}
-		_ = json.NewEncoder(w).Encode(claudeResponse{
-			StopReason: "end_turn",
-			Content: []claudeContentBlock{
-				{Type: "text", Text: `{"text":"Summary.","hypotheses":[],"actions":[]}`},
-			},
-		})
+		_ = json.NewEncoder(w).Encode(geminiTextResp(`{"text":"Summary.","hypotheses":[],"actions":[]}`))
 	}))
 	defer srv.Close()
 
-	n := NewClaude(ClaudeConfig{APIKey: "k", BaseURL: srv.URL})
+	n := NewGemini(GeminiConfig{APIKey: "k", BaseURL: srv.URL})
 	if _, err := n.Narrate(context.Background(), types.ChainResultPayload{}, nil); err != nil {
 		t.Fatalf("narrate: %v", err)
 	}
 }
 
-func TestClaudeNarratorToolSearchError(t *testing.T) {
+func TestGeminiNarratorToolSearchError(t *testing.T) {
 	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var reqBody claudeRequest
+		var reqBody geminiRequest
 		body, _ := io.ReadAll(r.Body)
 		_ = json.Unmarshal(body, &reqBody)
 		hasTool := false
-		for _, msg := range reqBody.Messages {
-			for _, blk := range msg.Content {
-				if blk.Type == "tool_result" {
+		for _, c := range reqBody.Contents {
+			for _, p := range c.Parts {
+				if p.FunctionResponse != nil {
 					hasTool = true
 				}
 			}
 		}
 		if !hasTool {
-			_ = json.NewEncoder(w).Encode(claudeResponse{
-				StopReason: "tool_use",
-				Content: []claudeContentBlock{
-					{Type: "tool_use", ID: "tu_1", Name: "lookup_process_reputation", Input: map[string]any{"name": "cmd.exe"}},
-				},
-			})
+			_ = json.NewEncoder(w).Encode(geminiCallResp("lookup_process_reputation", map[string]any{"name": "cmd.exe"}))
 		} else {
-			_ = json.NewEncoder(w).Encode(claudeResponse{
-				StopReason: "end_turn",
-				Content: []claudeContentBlock{
-					{Type: "text", Text: `{"text":"Narration despite search error.","hypotheses":[],"actions":[]}`},
-				},
-			})
+			_ = json.NewEncoder(w).Encode(geminiTextResp(`{"text":"Narration despite search error.","hypotheses":[],"actions":[]}`))
 		}
 	}))
 	defer srv.Close()
 
-	n := NewClaude(ClaudeConfig{
+	n := NewGemini(GeminiConfig{
 		APIKey:  "k",
 		BaseURL: srv.URL,
 		Searcher: &fakeSearcher{fn: func(_ context.Context, _ string) ([]map[string]any, error) {
@@ -399,21 +368,16 @@ func TestClaudeNarratorToolSearchError(t *testing.T) {
 	}
 }
 
-func TestClaudeNarratorMaxRoundsExceeded(t *testing.T) {
+func TestGeminiNarratorMaxRoundsExceeded(t *testing.T) {
 	t.Parallel()
 	var callCount atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		callCount.Add(1)
-		_ = json.NewEncoder(w).Encode(claudeResponse{
-			StopReason: "tool_use",
-			Content: []claudeContentBlock{
-				{Type: "tool_use", ID: fmt.Sprintf("tu_%d", callCount.Load()), Name: "lookup_process_reputation", Input: map[string]any{"name": "x.exe"}},
-			},
-		})
+		_ = json.NewEncoder(w).Encode(geminiCallResp("lookup_process_reputation", map[string]any{"name": "x.exe"}))
 	}))
 	defer srv.Close()
 
-	n := NewClaude(ClaudeConfig{
+	n := NewGemini(GeminiConfig{
 		APIKey:  "k",
 		BaseURL: srv.URL,
 		Searcher: &fakeSearcher{fn: func(_ context.Context, _ string) ([]map[string]any, error) {
@@ -432,7 +396,7 @@ func TestClaudeNarratorMaxRoundsExceeded(t *testing.T) {
 func TestDispatchToolSplunkSearchPassthrough(t *testing.T) {
 	t.Parallel()
 	var gotQuery string
-	n := NewClaude(ClaudeConfig{
+	n := NewGemini(GeminiConfig{
 		APIKey: "k",
 		Searcher: &fakeSearcher{fn: func(_ context.Context, q string) ([]map[string]any, error) {
 			gotQuery = q
@@ -452,7 +416,7 @@ func TestDispatchToolSplunkSearchPassthrough(t *testing.T) {
 func TestDispatchToolSplunkSearchRejectsMutating(t *testing.T) {
 	t.Parallel()
 	called := false
-	n := NewClaude(ClaudeConfig{
+	n := NewGemini(GeminiConfig{
 		APIKey: "k",
 		Searcher: &fakeSearcher{fn: func(_ context.Context, _ string) ([]map[string]any, error) {
 			called = true
@@ -522,28 +486,20 @@ func TestSplunkSearchActivityLabels(t *testing.T) {
 	}
 }
 
-func TestClaudeNarratorSplunkSearchSourceUsesSearcherName(t *testing.T) {
+func TestGeminiNarratorSplunkSearchSourceUsesSearcherName(t *testing.T) {
 	t.Parallel()
 	var callCount atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		callCount.Add(1)
 		if callCount.Load() == 1 {
-			_ = json.NewEncoder(w).Encode(claudeResponse{
-				StopReason: "tool_use",
-				Content: []claudeContentBlock{
-					{Type: "tool_use", ID: "tu_1", Name: "splunk_search", Input: map[string]any{"spl": "search index=sysmon"}},
-				},
-			})
+			_ = json.NewEncoder(w).Encode(geminiCallResp("splunk_search", map[string]any{"spl": "search index=sysmon"}))
 			return
 		}
-		_ = json.NewEncoder(w).Encode(claudeResponse{
-			StopReason: "end_turn",
-			Content:    []claudeContentBlock{{Type: "text", Text: `{"text":"done.","hypotheses":[],"actions":[]}`}},
-		})
+		_ = json.NewEncoder(w).Encode(geminiTextResp(`{"text":"done.","hypotheses":[],"actions":[]}`))
 	}))
 	defer srv.Close()
 
-	n := NewClaude(ClaudeConfig{
+	n := NewGemini(GeminiConfig{
 		APIKey:       "k",
 		BaseURL:      srv.URL,
 		SearcherName: "Splunk MCP Server",
@@ -586,9 +542,9 @@ func (f *fakeNLSearcher) Search(_ context.Context, q string) ([]map[string]any, 
 
 func TestNarratorToolMenuGatesNLSearch(t *testing.T) {
 	t.Parallel()
-	hasTool := func(tools []claudeTool, name string) bool {
-		for _, tl := range tools {
-			if tl.Name == name {
+	hasTool := func(decls []geminiFunctionDecl, name string) bool {
+		for _, d := range decls {
+			if d.Name == name {
 				return true
 			}
 		}
@@ -596,19 +552,19 @@ func TestNarratorToolMenuGatesNLSearch(t *testing.T) {
 	}
 
 	// SPLGenerator-capable searcher: splunk_nl_search present, 5 tools.
-	withGen := NewClaude(ClaudeConfig{APIKey: "k", Searcher: &fakeNLSearcher{}})
+	withGen := NewGemini(GeminiConfig{APIKey: "k", Searcher: &fakeNLSearcher{}})
 	if menu := withGen.toolMenu(); len(menu) != 5 || !hasTool(menu, "splunk_nl_search") {
 		t.Errorf("with SPLGenerator: got %d tools, splunk_nl_search present=%v", len(menu), hasTool(menu, "splunk_nl_search"))
 	}
 
 	// Plain searcher (Search only): splunk_nl_search absent, 4 tools.
-	plain := NewClaude(ClaudeConfig{APIKey: "k", Searcher: &fakeSearcher{fn: func(context.Context, string) ([]map[string]any, error) { return nil, nil }}})
+	plain := NewGemini(GeminiConfig{APIKey: "k", Searcher: &fakeSearcher{fn: func(context.Context, string) ([]map[string]any, error) { return nil, nil }}})
 	if menu := plain.toolMenu(); len(menu) != 4 || hasTool(menu, "splunk_nl_search") {
 		t.Errorf("plain searcher: got %d tools, splunk_nl_search present=%v", len(menu), hasTool(menu, "splunk_nl_search"))
 	}
 
 	// No searcher: no tools.
-	none := NewClaude(ClaudeConfig{APIKey: "k"})
+	none := NewGemini(GeminiConfig{APIKey: "k"})
 	if menu := none.toolMenu(); len(menu) != 0 {
 		t.Errorf("nil searcher: got %d tools, want 0", len(menu))
 	}
@@ -620,7 +576,7 @@ func TestDispatchNLSearchChainsGenerateGuardRun(t *testing.T) {
 		genSPL: "search index=sysmon EventCode=1 | head 5",
 		rows:   []map[string]any{{"EventCode": "1", "Image": "powershell.exe"}},
 	}
-	n := NewClaude(ClaudeConfig{APIKey: "k", Searcher: f, SearcherName: "Splunk MCP Server"})
+	n := NewGemini(GeminiConfig{APIKey: "k", Searcher: f, SearcherName: "Splunk MCP Server"})
 
 	var got []types.AgentActivityPayload
 	emit := func(a types.AgentActivityPayload) { got = append(got, a) }
@@ -650,7 +606,7 @@ func TestDispatchNLSearchChainsGenerateGuardRun(t *testing.T) {
 func TestDispatchNLSearchRefusesMutatingSPL(t *testing.T) {
 	t.Parallel()
 	f := &fakeNLSearcher{genSPL: "search index=x | delete"}
-	n := NewClaude(ClaudeConfig{APIKey: "k", Searcher: f})
+	n := NewGemini(GeminiConfig{APIKey: "k", Searcher: f})
 
 	content := n.dispatchNLSearch(context.Background(), map[string]any{"question": "wipe it"}, func(types.AgentActivityPayload) {})
 

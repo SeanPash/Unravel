@@ -58,24 +58,22 @@ func (stubIntelSource) CVE(_ context.Context, _ string) ([]types.CVEMatch, error
 	return nil, nil
 }
 
-func TestClaudeIntelAgentRunsToolThenReturns(t *testing.T) {
+func TestGeminiIntelAgentRunsToolThenReturns(t *testing.T) {
 	var calls int
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		calls++
-		var resp claudeResponse
+		var resp geminiResponse
 		if calls == 1 {
-			resp = claudeResponse{Content: []claudeContentBlock{
-				{Type: "tool_use", ID: "t1", Name: "lookup_kev", Input: map[string]any{"keyword": "kerberos"}},
-			}}
+			resp = geminiCallResp("lookup_kev", map[string]any{"keyword": "kerberos"})
 		} else {
 			final := `{"status":"ok","summary":"done","techniques":[{"id":"T1003.001","name":"LSASS Memory","groups":["APT29"],"software":["Mimikatz"],"mitigations":["RunAsPPL"]}],"cve_matches":[{"id":"CVE-2020-1472","summary":"Zerologon","in_kev":true,"severity":"CRITICAL"}]}`
-			resp = claudeResponse{Content: []claudeContentBlock{{Type: "text", Text: final}}}
+			resp = geminiTextResp(final)
 		}
 		_ = json.NewEncoder(w).Encode(resp)
 	}))
 	defer srv.Close()
 
-	a := NewClaudeIntel(ClaudeIntelConfig{APIKey: "k", BaseURL: srv.URL, Source: stubIntelSource{}})
+	a := NewGeminiIntel(GeminiIntelConfig{APIKey: "k", BaseURL: srv.URL, Source: stubIntelSource{}})
 	got, err := a.Enrich(context.Background(), sampleChain(), nil)
 	if err != nil {
 		t.Fatalf("enrich: %v", err)
@@ -91,25 +89,21 @@ func TestClaudeIntelAgentRunsToolThenReturns(t *testing.T) {
 	}
 }
 
-func TestClaudeIntelAgentEmitsActivity(t *testing.T) {
+func TestGeminiIntelAgentEmitsActivity(t *testing.T) {
 	var calls int
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		calls++
-		var resp claudeResponse
+		var resp geminiResponse
 		if calls == 1 {
-			resp = claudeResponse{Content: []claudeContentBlock{
-				{Type: "tool_use", ID: "t1", Name: "lookup_kev", Input: map[string]any{"keyword": "kerberos"}},
-			}}
+			resp = geminiCallResp("lookup_kev", map[string]any{"keyword": "kerberos"})
 		} else {
-			resp = claudeResponse{Content: []claudeContentBlock{
-				{Type: "text", Text: `{"status":"ok","summary":"done","techniques":[],"cve_matches":[]}`},
-			}}
+			resp = geminiTextResp(`{"status":"ok","summary":"done","techniques":[],"cve_matches":[]}`)
 		}
 		_ = json.NewEncoder(w).Encode(resp)
 	}))
 	defer srv.Close()
 
-	a := NewClaudeIntel(ClaudeIntelConfig{APIKey: "k", BaseURL: srv.URL, Source: stubIntelSource{}})
+	a := NewGeminiIntel(GeminiIntelConfig{APIKey: "k", BaseURL: srv.URL, Source: stubIntelSource{}})
 	var got []types.AgentActivityPayload
 	emit := func(p types.AgentActivityPayload) { got = append(got, p) }
 	if _, err := a.Enrich(context.Background(), sampleChain(), emit); err != nil {
