@@ -20,7 +20,7 @@ A canonical enterprise kill chain runs end-to-end inside a virtualized Active Di
 4. Dumped credentials authenticate to the Domain Controller via Kerberos
 5. Domain Controller compromise
 
-The engine reconstructs this chain live, with the audience watching the suspicion score climb and the causal graph form in real time.
+The engine reconstructs this chain live, with the audience watching the suspicion score climb and the causal graph form.
 
 ## Architecture
 
