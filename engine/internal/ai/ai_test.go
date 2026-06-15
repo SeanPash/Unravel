@@ -589,9 +589,12 @@ func TestDispatchNLSearchChainsGenerateGuardRun(t *testing.T) {
 	if !strings.Contains(content, "generated_spl") || !strings.Contains(content, "powershell.exe") {
 		t.Errorf("content = %q, want generated_spl and rows", content)
 	}
+	// The generate sub-step is sourced to the SAIA backend (default
+	// "Splunk MCP Server / SAIA"); the run sub-step to the MCP server. The
+	// "Splunk AI Assistant" wording lives in the activity Label, not the Source.
 	var sawGen, sawRun bool
 	for _, a := range got {
-		if a.Source == "Splunk AI Assistant" {
+		if a.Source == "Splunk MCP Server / SAIA" {
 			sawGen = true
 		}
 		if a.Source == "Splunk MCP Server" {
