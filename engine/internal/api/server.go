@@ -7,6 +7,8 @@ import (
 	"io/fs"
 	"net/http"
 	"net/url"
+	"path"
+	"regexp"
 	"strings"
 	"time"
 
@@ -93,9 +95,71 @@ func (s *Server) Handler() http.Handler {
 		_, _ = w.Write([]byte("ok"))
 	})
 	if s.Static != nil {
-		mux.Handle("/", http.FileServer(http.FS(s.Static)))
+		mux.Handle("/", staticHandler(s.Static))
 	}
 	return s.withAuth(mux)
+}
+
+// entryAssetRe matches a Vite content-hashed bundle reference in index.html,
+// e.g. /assets/index-DpJ0HMBp.js. The capture group is the asset type.
+var entryAssetRe = regexp.MustCompile(`/assets/[A-Za-z0-9._-]+\.(js|css)`)
+
+// currentEntryAssets reads the embedded index.html and returns the current
+// bundle path for each asset type (js, css). The hashes change every build, so
+// this is the single source of truth for what the live UI shell references.
+func currentEntryAssets(fsys fs.FS) map[string]string {
+	entries := map[string]string{}
+	b, err := fs.ReadFile(fsys, "index.html")
+	if err != nil {
+		return entries
+	}
+	for _, m := range entryAssetRe.FindAllStringSubmatch(string(b), -1) {
+		if _, ok := entries[m[1]]; !ok {
+			entries[m[1]] = m[0] // entries["js"] = "/assets/index-<hash>.js"
+		}
+	}
+	return entries
+}
+
+// staticHandler serves the embedded UI with two protections against a rebuilt
+// binary stranding a browser on a stale bundle (which renders as a black page).
+//
+// First, embedded files carry a zero modtime, so http.FileServer sends no
+// Last-Modified or ETag; a browser can then heuristically hold a cached
+// index.html that points at a content-hashed bundle the new binary no longer
+// contains. index.html is therefore served no-store so the browser always
+// re-fetches the current asset hashes.
+//
+// Second, no-store cannot evict an index.html a browser already cached before
+// the fix shipped. So a missing /assets/*.{js,css} (a hash from an older build)
+// is redirected to the current bundle of the same type rather than 404'd; the
+// stale shell then loads the current script and recovers on an ordinary reload,
+// with no manual hard refresh. Present hashed assets are immutable and cache
+// indefinitely.
+func staticHandler(fsys fs.FS) http.Handler {
+	fileServer := http.FileServer(http.FS(fsys))
+	entries := currentEntryAssets(fsys)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		p := r.URL.Path
+		switch {
+		case strings.HasPrefix(p, "/assets/"):
+			if _, err := fs.Stat(fsys, strings.TrimPrefix(p, "/")); err != nil {
+				ext := strings.TrimPrefix(path.Ext(p), ".")
+				if target, ok := entries[ext]; ok && target != p {
+					w.Header().Set("Cache-Control", "no-store")
+					http.Redirect(w, r, target, http.StatusFound)
+					return
+				}
+			}
+			w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+		case p == "/" || p == "/index.html":
+			w.Header().Set("Cache-Control", "no-store, must-revalidate")
+		default:
+			// Other top-level files (favicon, icons) revalidate cheaply.
+			w.Header().Set("Cache-Control", "no-cache")
+		}
+		fileServer.ServeHTTP(w, r)
+	})
 }
 
 // withAuth wraps next so that, when AuthToken is set, every route except
