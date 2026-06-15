@@ -24,17 +24,15 @@ A SOC analyst gets a Splunk alert: PowerShell ran on a workstation. That single 
 
 Every answer lives in Splunk already, scattered across Sysmon, Windows Security, and Active Directory audit logs. Stitching it back into one story is 30+ minutes of manual pivoting per alert, and the clock is running while the intruder moves.
 
-Unravel does that stitching continuously and automatically. As events stream out of Splunk, it grows a typed provenance graph in memory, scores each new edge for suspicion against a learned baseline, and the moment a connected cluster crosses a threshold it walks backward to recover the single most suspicious causal path. Then, and only then, it hands that path to an LLM to narrate in plain English.
+Unravel does that stitching continuously and automatically. As events stream out of Splunk, it grows a typed provenance graph in memory, scores each new edge for suspicion against a learned baseline, and the moment a connected cluster crosses a threshold it walks backward to recover the single most suspicious causal path. Only then does an LLM get involved, to turn that path into plain English.
 
-## The one design decision everything hangs on
+## Engine first, AI second
 
 Seven subcomponents do the work. Six of them are pure Go with zero LLM calls: ingest, schema mapping, graph construction, temporal indexing, suspicion scoring, and chain extraction. The seventh, the narrator, is the only place an LLM is allowed to touch anything.
 
-We took this seriously enough to ship a switch that proves it. Run the engine with `--mode=ai-off` and the whole pipeline still ingests, builds the graph, scores it, and extracts the attack chain. You lose the English narration and nothing else. The intelligence is in the data structures, not the prompt.
+Run the engine with `--mode=ai-off` and the whole pipeline still ingests, builds the graph, scores it, and extracts the attack chain. You lose the English narration and nothing else.
 
 ## What it reconstructs
-
-The demo runs a full enterprise kill chain end to end, the kind that turns one phished laptop into domain compromise:
 
 1. A macro-enabled document is delivered by phishing (`T1566.001`)
 2. The macro spawns PowerShell (`T1059.001`)
@@ -42,7 +40,7 @@ The demo runs a full enterprise kill chain end to end, the kind that turns one p
 4. A stolen ticket authenticates to the Domain Controller (`T1550.003`, pass-the-ticket)
 5. A domain-admin session opens on the DC (`T1078.002`)
 
-You watch the suspicion score climb and the causal graph assemble itself in the browser as each step fires. Every step the engine extracts is mapped to its MITRE ATT&CK technique and tactic by deterministic rules, no model required.
+You watch the suspicion score climb and the causal graph assemble itself in the browser as each step fires. Each extracted step gets its MITRE ATT&CK technique and tactic from deterministic rules, not from a model.
 
 ## How it works
 
@@ -84,11 +82,11 @@ Two agents sit at the seam, both built on Gemini 3.1 Flash Lite (Google). The st
 
 **Threat-intel agent.** Enriches the chain's techniques against live external sources, again via tool calls: `lookup_technique_intel` (MITRE ATT&CK), `lookup_kev` (CISA Known Exploited Vulnerabilities), and `search_cve` (NVD). Returns matched techniques and CVEs with KEV/severity flags.
 
-**Routed through the Splunk MCP Server.** In live mode with `--splunk-mcp-url` set, the narrator's Splunk enrichment runs through the official Splunk MCP Server: each SPL query the narrator builds executes via the server's `splunk_run_query` tool over the MCP streamable-HTTP transport, instead of hitting the REST search endpoint directly. With MCP enabled the narrator also gains a `splunk_nl_search` tool: it hands a natural-language question to the Splunk AI Assistant (`saia_generate_spl`) to generate SPL, then runs that generated SPL back through `splunk_run_query`. The activity feed shows both sub-steps, the AI Assistant writing the SPL and the MCP server running it. The engine resolves the actual tool names from the server's `tools/list` on connect and degrades gracefully if the server renamed them or the AI Assistant is unlicensed. This is AI-assisted evidence gathering with Splunk's own MCP Server doing the search.
+**Routed through the Splunk MCP Server.** In live mode with `--splunk-mcp-url` set, the narrator's Splunk enrichment runs through the official Splunk MCP Server: each SPL query the narrator builds executes via the server's `splunk_run_query` tool over the MCP streamable-HTTP transport, instead of hitting the REST search endpoint directly. With MCP enabled the narrator also gains a `splunk_nl_search` tool: it hands a natural-language question to the Splunk AI Assistant (`saia_generate_spl`) to generate SPL, then runs that generated SPL back through `splunk_run_query`. The activity feed shows both sub-steps, the AI Assistant writing the SPL and the MCP server running it. The engine resolves the actual tool names from the server's `tools/list` on connect and degrades gracefully if the server renamed them or the AI Assistant is unlicensed.
 
-The important part: the model only enriches its *own* input. It never decides what the attack chain is. That decision was already made by the Go engine before the first token was generated. And if you have no API key, the narrator falls back to a deterministic stub and the intel agent falls back to a bundled ATT&CK snapshot, so every tab in the UI still works with zero keys.
+The model only ever enriches its own input. It never decides what the attack chain is; the Go engine has already settled that before the narrator runs. And if you have no API key, the narrator falls back to a deterministic stub and the intel agent falls back to a bundled ATT&CK snapshot, so every tab in the UI still works with zero keys.
 
-## The fastest way in: type `unravel`
+## Just type `unravel`
 
 If you just want to point Unravel at your own Splunk and watch it work, install it and run the wizard:
 
@@ -202,7 +200,7 @@ Every flag has a sensible default, so `./unravel --mode=replay` runs with no arg
 | Graph store | Custom in-memory adjacency + BadgerDB snapshots | In-process and directly inspectable, with periodic snapshots for durability |
 | Splunk read | REST `search/jobs/export` tail | Splunk-native, no Kafka, no extra moving parts |
 | Splunk write-back | HEC | Findings return to Splunk as notable events |
-| Transport | `gorilla/websocket` | Mature, boring, reliable |
+| Transport | `gorilla/websocket` | Widely used, simple upgrade/read/write API |
 | UI | React 18 + Vite + TypeScript | Fast iteration and type safety |
 | Graph view | Cytoscape.js + Cola layout | Animates well and holds up under a live demo |
 | Models | Gemini 3.1 Flash Lite (Google) | Good cost/latency for a handful of call-sites; static system-instruction prefix benefits from implicit context caching |
@@ -210,7 +208,7 @@ Every flag has a sensible default, so `./unravel --mode=replay` runs with no arg
 
 ## The UI
 
-The front end (React + Cytoscape.js, embedded in the engine binary) is built to make an investigation legible at a glance, not just pretty:
+The front end (React + Cytoscape.js, embedded in the engine binary) is built to make an investigation readable at a glance:
 
 - **Live provenance graph** - nodes colored by suspicion, edges appearing in real time as Splunk events arrive.
 - **Incident map + minimap** - when the engine separates activity into distinct incidents, each gets its own labeled region; the minimap shows the whole picture and lets you scrub and pan.
@@ -237,9 +235,9 @@ The front end (React + Cytoscape.js, embedded in the engine binary) is built to 
 - *Write back:* reconstructed chains are posted to Splunk over the HTTP Event Collector (HEC) as notable events, so an analyst pivots from the engine's output straight back into raw logs.
 - *Splunk MCP Server:* in live mode with `--splunk-mcp-url` set, the AI narrator's evidence-gathering runs through the official Splunk MCP Server. Every SPL query it builds executes via the server's `splunk_run_query` tool over the MCP streamable-HTTP transport, and tool names are resolved from the server's `tools/list` on connect.
 
-**Splunk hosted models (Splunk AI Assistant / SAIA).** With MCP enabled, the narrator gains a `splunk_nl_search` tool: it hands a natural-language question to the Splunk AI Assistant's `saia_generate_spl` to generate SPL, then runs that generated SPL back through `splunk_run_query`. The activity feed shows both sub-steps, the AI Assistant writing the SPL and the MCP server running it. This is Splunk's own hosted model doing the search generation.
+**Splunk hosted models (Splunk AI Assistant / SAIA).** With MCP enabled, the narrator gains a `splunk_nl_search` tool: it hands a natural-language question to the Splunk AI Assistant's `saia_generate_spl` to generate SPL, then runs that generated SPL back through `splunk_run_query`. The activity feed shows both sub-steps, the AI Assistant writing the SPL and the MCP server running it.
 
-**AI integration.** The narration LLM is Google Gemini 3.1 Flash Lite, used as an agent: it runs tool-use rounds to enrich its own context (process reputation, logon history, raw events, MITRE/KEV/NVD intel) before writing a word. Crucially it never decides what the attack chain is; the Go engine made that decision before the first token. With no keys at all, the narrator falls back to a deterministic stub and the intel agent to a bundled ATT&CK snapshot, so every tab still works.
+**AI integration.** The narration LLM is Google Gemini 3.1 Flash Lite, used as an agent: it runs tool-use rounds to enrich its own context (process reputation, logon history, raw events, MITRE/KEV/NVD intel) before writing a word. With no keys at all, the narrator falls back to a deterministic stub and the intel agent to a bundled ATT&CK snapshot, so every tab still works.
 
 **Required deliverables.** Open-source license ([MIT](LICENSE)), this README with full setup and run instructions, and the architecture diagram ([architecture.svg](architecture.svg)) in the repo root showing the Splunk interaction, the AI seam, and the data flow between components, plus a deep-dive AI agent diagram ([ai-architecture.svg](ai-architecture.svg)) detailing the agents' tool-use loops, the read-only SPL guard, and the Splunk MCP/SAIA routing.
 

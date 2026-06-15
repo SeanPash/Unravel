@@ -1,149 +1,141 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1060 560" width="1060" height="560" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1120 640" width="1120" height="640" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif">
   <defs>
-    <marker id="arr" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
-      <polygon points="0 0, 10 3.5, 0 7" fill="#374151"/>
+    <marker id="arr" markerWidth="9" markerHeight="9" refX="7" refY="3.2" orient="auto">
+      <path d="M0 0 L7 3.2 L0 6.4 Z" fill="#334155"/>
     </marker>
-    <marker id="arrA" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
-      <polygon points="0 0, 10 3.5, 0 7" fill="#b45309"/>
-    </marker>
-    <marker id="arrG" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
-      <polygon points="0 0, 10 3.5, 0 7" fill="#047857"/>
+    <marker id="arrA" markerWidth="9" markerHeight="9" refX="7" refY="3.2" orient="auto">
+      <path d="M0 0 L7 3.2 L0 6.4 Z" fill="#b45309"/>
     </marker>
   </defs>
 
-  <rect width="1060" height="560" fill="#ffffff"/>
+  <rect width="1120" height="640" fill="#ffffff"/>
 
   <!-- Title -->
-  <text x="530" y="34" text-anchor="middle" font-size="18" font-weight="700" fill="#111827">Unravel - Causal Reconstruction Engine</text>
-  <text x="530" y="54" text-anchor="middle" font-size="12" fill="#6b7280">Engine first, AI second: 6 of 7 subcomponents are pure Go with zero LLM calls</text>
+  <text x="560" y="36" text-anchor="middle" font-size="19" font-weight="700" fill="#0f172a">Unravel: Causal Reconstruction Engine</text>
+  <text x="560" y="58" text-anchor="middle" font-size="12.5" fill="#64748b">Engine first, AI second. Six of seven subcomponents are pure Go with zero LLM calls.</text>
+
+  <!-- ============ Left: lab + Splunk ============ -->
 
   <!-- GOAD Lab -->
-  <rect x="20" y="170" width="140" height="150" rx="6" fill="#f9fafb" stroke="#374151" stroke-width="1.5"/>
-  <text x="90" y="196" text-anchor="middle" font-size="13" font-weight="600" fill="#111827">GOAD Lab</text>
-  <text x="90" y="221" text-anchor="middle" font-size="11" fill="#6b7280">dc01 (Domain Controller)</text>
-  <text x="90" y="240" text-anchor="middle" font-size="11" fill="#6b7280">ws01 (victim)</text>
-  <text x="90" y="266" text-anchor="middle" font-size="10" fill="#6b7280">Sysmon / WinSec / AD</text>
-  <text x="90" y="282" text-anchor="middle" font-size="10" fill="#6b7280">forwarder</text>
-  <text x="90" y="305" text-anchor="middle" font-size="10" font-style="italic" fill="#9ca3af">Vagrant + Ansible</text>
+  <rect x="30" y="160" width="130" height="150" rx="8" fill="#f8fafc" stroke="#334155" stroke-width="1.4"/>
+  <text x="95" y="184" text-anchor="middle" font-size="12.5" font-weight="600" fill="#0f172a">GOAD Lab</text>
+  <text x="95" y="207" text-anchor="middle" font-size="10" fill="#64748b">dc01 (DC)</text>
+  <text x="95" y="224" text-anchor="middle" font-size="10" fill="#64748b">ws01 (victim)</text>
+  <text x="95" y="241" text-anchor="middle" font-size="10" fill="#64748b">srv02 (relay)</text>
+  <text x="95" y="263" text-anchor="middle" font-size="9.5" fill="#64748b">Sysmon, WinSec, AD</text>
+  <text x="95" y="285" text-anchor="middle" font-size="9" font-style="italic" fill="#94a3b8">Universal Forwarder</text>
 
-  <!-- Arrow: GOAD Lab to Splunk -->
-  <line x1="160" y1="245" x2="217" y2="245" stroke="#374151" stroke-width="1.5" marker-end="url(#arr)"/>
+  <!-- Forwarder arrow GOAD to Splunk -->
+  <line x1="160" y1="235" x2="183" y2="235" stroke="#334155" stroke-width="1.4" marker-end="url(#arr)"/>
 
-  <!-- Splunk -->
-  <rect x="219" y="170" width="150" height="150" rx="6" fill="#eef2ff" stroke="#374151" stroke-width="1.5"/>
-  <text x="294" y="198" text-anchor="middle" font-size="14" font-weight="700" fill="#111827">Splunk</text>
-  <text x="294" y="218" text-anchor="middle" font-size="11" fill="#6b7280">Enterprise</text>
-  <text x="294" y="237" text-anchor="middle" font-size="11" fill="#6b7280">indexed events</text>
-  <line x1="239" y1="252" x2="349" y2="252" stroke="#d1d5db" stroke-width="1"/>
-  <text x="294" y="272" text-anchor="middle" font-size="10" fill="#6b7280">REST jobs/export (tail in)</text>
-  <text x="294" y="289" text-anchor="middle" font-size="10" fill="#6b7280">HEC (write-back out)</text>
-  <text x="294" y="306" text-anchor="middle" font-size="10" font-style="italic" fill="#9ca3af">+ MCP Server / SAIA</text>
+  <!-- Splunk Enterprise -->
+  <rect x="185" y="160" width="140" height="150" rx="8" fill="#eef2ff" stroke="#334155" stroke-width="1.4"/>
+  <text x="255" y="184" text-anchor="middle" font-size="12" font-weight="700" fill="#0f172a">Splunk Enterprise</text>
+  <text x="255" y="203" text-anchor="middle" font-size="10" fill="#64748b">indexed events</text>
+  <line x1="203" y1="214" x2="307" y2="214" stroke="#cbd5e1" stroke-width="1"/>
+  <text x="255" y="234" text-anchor="middle" font-size="10" fill="#475569">REST jobs/export</text>
+  <text x="255" y="250" text-anchor="middle" font-size="9.5" fill="#64748b">(streaming tail)</text>
+  <text x="255" y="272" text-anchor="middle" font-size="10" fill="#475569">HEC write-back</text>
 
-  <!-- Arrow: Splunk to Engine (REST tail ingest) -->
-  <line x1="369" y1="225" x2="426" y2="225" stroke="#374151" stroke-width="1.5" marker-end="url(#arr)"/>
-  <text x="397" y="216" text-anchor="middle" font-size="9" fill="#6b7280">REST tail</text>
-  <text x="397" y="240" text-anchor="middle" font-size="9" fill="#6b7280">events in</text>
+  <!-- Ingest arrow Splunk to Engine -->
+  <text x="352" y="168" text-anchor="middle" font-size="8.5" fill="#475569">REST tail</text>
+  <line x1="325" y1="176" x2="378" y2="176" stroke="#334155" stroke-width="1.5" marker-end="url(#arr)"/>
+  <text x="352" y="190" text-anchor="middle" font-size="8" fill="#94a3b8">events in</text>
 
-  <!-- Arrow: Engine to Splunk (HEC write-back) -->
-  <line x1="426" y1="278" x2="369" y2="278" stroke="#374151" stroke-width="1.5" marker-end="url(#arr)"/>
-  <text x="397" y="295" text-anchor="middle" font-size="9" fill="#6b7280">HEC results out</text>
+  <!-- HEC write-back arrow Engine to Splunk -->
+  <text x="352" y="248" text-anchor="middle" font-size="8.5" fill="#475569">HEC notable</text>
+  <line x1="378" y1="256" x2="325" y2="256" stroke="#334155" stroke-width="1.5" marker-end="url(#arr)"/>
 
-  <!-- Engine box -->
-  <rect x="428" y="100" width="320" height="380" rx="6" fill="#f9fafb" stroke="#374151" stroke-width="2"/>
-  <text x="588" y="126" text-anchor="middle" font-size="13" font-weight="700" fill="#111827">Causal Reconstruction Engine (Go)</text>
+  <!-- ============ Center: Engine ============ -->
+  <rect x="380" y="100" width="380" height="448" rx="10" fill="#f8fafc" stroke="#334155" stroke-width="2"/>
+  <text x="570" y="122" text-anchor="middle" font-size="14" font-weight="700" fill="#0f172a">Causal Reconstruction Engine (Go)</text>
+  <text x="570" y="138" text-anchor="middle" font-size="10" fill="#64748b">seven streaming subcomponents</text>
 
-  <!-- Component rows -->
-  <rect x="444" y="138" width="288" height="30" rx="3" fill="#dbeafe" stroke="#93c5fd" stroke-width="1"/>
-  <text x="588" y="158" text-anchor="middle" font-size="12" fill="#1e40af">1. Ingest layer (REST tail)</text>
+  <!-- Row 1 -->
+  <rect x="410" y="150" width="320" height="38" rx="6" fill="#eff6ff" stroke="#bfdbfe" stroke-width="1"/>
+  <text x="424" y="174" font-size="12.5" font-weight="600" fill="#1e3a8a">1. Ingest layer</text>
+  <text x="716" y="174" text-anchor="end" font-size="10" fill="#64748b">Splunk REST tail to envelope</text>
+  <line x1="570" y1="188" x2="570" y2="201" stroke="#94a3b8" stroke-width="1.3" marker-end="url(#arr)"/>
 
-  <rect x="444" y="173" width="288" height="30" rx="3" fill="#dbeafe" stroke="#93c5fd" stroke-width="1"/>
-  <text x="588" y="193" text-anchor="middle" font-size="12" fill="#1e40af">2. Schema mapper</text>
+  <!-- Row 2 -->
+  <rect x="410" y="201" width="320" height="38" rx="6" fill="#eff6ff" stroke="#bfdbfe" stroke-width="1"/>
+  <text x="424" y="225" font-size="12.5" font-weight="600" fill="#1e3a8a">2. Schema mapper</text>
+  <text x="716" y="225" text-anchor="end" font-size="10" fill="#64748b">typed structs per source</text>
+  <line x1="570" y1="239" x2="570" y2="252" stroke="#94a3b8" stroke-width="1.3" marker-end="url(#arr)"/>
 
-  <rect x="444" y="208" width="288" height="30" rx="3" fill="#dbeafe" stroke="#93c5fd" stroke-width="1"/>
-  <text x="588" y="228" text-anchor="middle" font-size="12" fill="#1e40af">3. Provenance graph builder</text>
+  <!-- Row 3 -->
+  <rect x="410" y="252" width="320" height="38" rx="6" fill="#eff6ff" stroke="#bfdbfe" stroke-width="1"/>
+  <text x="424" y="276" font-size="12.5" font-weight="600" fill="#1e3a8a">3. Provenance graph builder</text>
+  <text x="716" y="276" text-anchor="end" font-size="10" fill="#64748b">incremental, in-memory</text>
+  <line x1="570" y1="290" x2="570" y2="303" stroke="#94a3b8" stroke-width="1.3" marker-end="url(#arr)"/>
 
-  <rect x="444" y="243" width="288" height="30" rx="3" fill="#dbeafe" stroke="#93c5fd" stroke-width="1"/>
-  <text x="588" y="263" text-anchor="middle" font-size="12" fill="#1e40af">4. Temporal causal index</text>
+  <!-- Row 4 -->
+  <rect x="410" y="303" width="320" height="38" rx="6" fill="#eff6ff" stroke="#bfdbfe" stroke-width="1"/>
+  <text x="424" y="327" font-size="12.5" font-weight="600" fill="#1e3a8a">4. Temporal causal index</text>
+  <text x="716" y="327" text-anchor="end" font-size="10" fill="#64748b">time-bucketed lookups</text>
+  <line x1="570" y1="341" x2="570" y2="354" stroke="#94a3b8" stroke-width="1.3" marker-end="url(#arr)"/>
 
-  <rect x="444" y="278" width="288" height="30" rx="3" fill="#dbeafe" stroke="#93c5fd" stroke-width="1"/>
-  <text x="588" y="298" text-anchor="middle" font-size="12" fill="#1e40af">5. Suspicion scorer</text>
+  <!-- Row 5 -->
+  <rect x="410" y="354" width="320" height="38" rx="6" fill="#eff6ff" stroke="#bfdbfe" stroke-width="1"/>
+  <text x="424" y="378" font-size="12.5" font-weight="600" fill="#1e3a8a">5. Suspicion scorer</text>
+  <text x="716" y="378" text-anchor="end" font-size="10" fill="#64748b">rarity x decay x lift</text>
+  <line x1="570" y1="392" x2="570" y2="405" stroke="#94a3b8" stroke-width="1.3" marker-end="url(#arr)"/>
 
-  <rect x="444" y="313" width="288" height="30" rx="3" fill="#dbeafe" stroke="#93c5fd" stroke-width="1"/>
-  <text x="588" y="333" text-anchor="middle" font-size="12" fill="#1e40af">6. Chain extractor</text>
+  <!-- Row 6 -->
+  <rect x="410" y="405" width="320" height="38" rx="6" fill="#eff6ff" stroke="#bfdbfe" stroke-width="1"/>
+  <text x="424" y="429" font-size="12.5" font-weight="600" fill="#1e3a8a">6. Chain extractor</text>
+  <text x="716" y="429" text-anchor="end" font-size="10" fill="#64748b">max-suspicion backward walk</text>
+  <line x1="570" y1="443" x2="570" y2="456" stroke="#b45309" stroke-width="1.3" marker-end="url(#arrA)"/>
 
-  <!-- Row 7: AI narrator (amber, the only LLM seam) -->
-  <rect x="444" y="348" width="288" height="34" rx="3" fill="#fef3c7" stroke="#f59e0b" stroke-width="1.5"/>
-  <text x="588" y="364" text-anchor="middle" font-size="12" font-weight="600" fill="#92400e">7. AI narrator (agent) *</text>
-  <text x="588" y="377" text-anchor="middle" font-size="9" fill="#b45309">+ threat-intel agent</text>
+  <!-- Row 7: AI seam -->
+  <rect x="410" y="456" width="320" height="44" rx="6" fill="#fffbeb" stroke="#f59e0b" stroke-width="1.6"/>
+  <text x="424" y="476" font-size="12.5" font-weight="700" fill="#92400e">7. AI narrator + threat-intel agent</text>
+  <text x="424" y="491" font-size="9.5" fill="#b45309">chain to plain English, hypotheses, containment</text>
+  <text x="716" y="481" text-anchor="end" font-size="10" font-style="italic" fill="#b45309">AI seam</text>
 
-  <!-- in-engine notes -->
-  <text x="588" y="404" text-anchor="middle" font-size="9" font-style="italic" fill="#6b7280">in-memory graph + BadgerDB snapshots</text>
-  <text x="588" y="419" text-anchor="middle" font-size="9" font-style="italic" fill="#6b7280">React UI embedded via go:embed</text>
-  <text x="588" y="447" text-anchor="middle" font-size="9" font-style="italic" fill="#9ca3af">rows 1-6: pure Go, zero LLM calls</text>
-  <text x="588" y="462" text-anchor="middle" font-size="9" font-style="italic" fill="#92400e">* only LLM-touching component</text>
+  <!-- Engine notes -->
+  <text x="570" y="520" text-anchor="middle" font-size="9.5" font-style="italic" fill="#64748b">In-memory provenance graph, periodic BadgerDB snapshots. React UI embedded via go:embed.</text>
+  <text x="570" y="536" text-anchor="middle" font-size="9.5" font-style="italic" fill="#92400e">Row 7 is the only LLM-touching hop. AI-off mode skips it and still ships a reconstructed chain.</text>
 
-  <!-- Arrow: Engine to Browser -->
-  <line x1="748" y1="200" x2="817" y2="200" stroke="#374151" stroke-width="1.5" marker-end="url(#arr)"/>
-  <text x="782" y="191" text-anchor="middle" font-size="10" fill="#6b7280">WebSocket</text>
+  <!-- ============ Right: UI + Gemini ============ -->
 
-  <!-- Browser -->
-  <rect x="819" y="150" width="220" height="160" rx="6" fill="#f9fafb" stroke="#374151" stroke-width="1.5"/>
-  <text x="929" y="178" text-anchor="middle" font-size="13" font-weight="600" fill="#111827">Browser UI</text>
-  <text x="929" y="200" text-anchor="middle" font-size="11" fill="#6b7280">React 18 + Cytoscape.js</text>
-  <text x="929" y="222" text-anchor="middle" font-size="11" fill="#6b7280">live provenance graph</text>
-  <text x="929" y="241" text-anchor="middle" font-size="11" fill="#6b7280">narration + phase cards</text>
-  <text x="929" y="260" text-anchor="middle" font-size="11" fill="#6b7280">investigation feed</text>
-  <text x="929" y="287" text-anchor="middle" font-size="10" font-style="italic" fill="#9ca3af">time scrubber, minimap</text>
+  <!-- WebSocket arrow Engine to Browser -->
+  <text x="780" y="188" text-anchor="middle" font-size="9" fill="#475569">WebSocket</text>
+  <line x1="760" y1="195" x2="798" y2="195" stroke="#334155" stroke-width="1.5" marker-end="url(#arr)"/>
 
-  <!-- Gemini (narration LLM) -->
-  <rect x="819" y="350" width="220" height="100" rx="6" fill="#dcfce7" stroke="#047857" stroke-width="1.5"/>
-  <text x="929" y="378" text-anchor="middle" font-size="13" font-weight="700" fill="#065f46">Google Gemini</text>
-  <text x="929" y="398" text-anchor="middle" font-size="11" fill="#047857">3.1 Flash Lite</text>
-  <text x="929" y="418" text-anchor="middle" font-size="10" fill="#047857">narration LLM (agent)</text>
-  <text x="929" y="436" text-anchor="middle" font-size="9" font-style="italic" fill="#6b7280">tool-use + implicit cache</text>
+  <!-- Browser UI -->
+  <rect x="800" y="120" width="290" height="150" rx="8" fill="#f8fafc" stroke="#334155" stroke-width="1.4"/>
+  <text x="945" y="146" text-anchor="middle" font-size="13" font-weight="600" fill="#0f172a">Browser UI</text>
+  <text x="945" y="168" text-anchor="middle" font-size="10.5" fill="#64748b">React 18 + Cytoscape.js</text>
+  <text x="945" y="190" text-anchor="middle" font-size="10.5" fill="#64748b">live provenance graph</text>
+  <text x="945" y="210" text-anchor="middle" font-size="10.5" fill="#64748b">narration + phase cards</text>
+  <text x="945" y="230" text-anchor="middle" font-size="10.5" fill="#64748b">live agent activity feed</text>
+  <text x="945" y="252" text-anchor="middle" font-size="9.5" font-style="italic" fill="#94a3b8">time scrubber, minimap</text>
 
-  <!-- Arrow: narrator to Gemini -->
-  <line x1="732" y1="365" x2="817" y2="395" stroke="#047857" stroke-width="1.5" marker-end="url(#arrG)"/>
-  <text x="775" y="372" text-anchor="middle" font-size="9" fill="#047857">narrate</text>
+  <!-- Narrate arrow Engine row 7 to Gemini -->
+  <text x="780" y="462" text-anchor="middle" font-size="9" fill="#b45309">narrate /</text>
+  <text x="780" y="473" text-anchor="middle" font-size="9" fill="#b45309">enrich</text>
+  <line x1="760" y1="486" x2="798" y2="478" stroke="#b45309" stroke-width="1.6" marker-end="url(#arrA)"/>
 
-  <!-- Splunk MCP Server / SAIA: narrator enrichment hop (AI seam, amber) -->
-  <rect x="219" y="360" width="180" height="120" rx="6" fill="#fef3c7" stroke="#f59e0b" stroke-width="1.5"/>
-  <text x="309" y="385" text-anchor="middle" font-size="13" font-weight="700" fill="#92400e">Splunk MCP Server</text>
-  <text x="309" y="406" text-anchor="middle" font-size="10" fill="#b45309">splunk_run_query (run SPL)</text>
-  <text x="309" y="424" text-anchor="middle" font-size="10" fill="#b45309">saia_generate_spl (SAIA)</text>
-  <text x="309" y="442" text-anchor="middle" font-size="9" fill="#6b7280">Splunk AI Assistant: NL to SPL</text>
-  <text x="309" y="467" text-anchor="middle" font-size="9" font-style="italic" fill="#9ca3af">live mode; REST fallback</text>
+  <!-- Gemini -->
+  <rect x="800" y="400" width="290" height="150" rx="8" fill="#ecfdf5" stroke="#047857" stroke-width="1.5"/>
+  <text x="945" y="426" text-anchor="middle" font-size="13" font-weight="700" fill="#065f46">Google Gemini</text>
+  <text x="945" y="448" text-anchor="middle" font-size="11" fill="#047857">3.1 Flash Lite</text>
+  <text x="945" y="470" text-anchor="middle" font-size="10.5" fill="#047857">narrator + threat-intel agent</text>
+  <text x="945" y="490" text-anchor="middle" font-size="10" fill="#475569">tool-use loop, max 3 rounds</text>
+  <text x="945" y="512" text-anchor="middle" font-size="9.5" fill="#475569">static schema preamble, implicit cache</text>
+  <text x="945" y="532" text-anchor="middle" font-size="9.5" font-style="italic" fill="#94a3b8">tool calls: see agent-flow.svg</text>
 
-  <!-- Arrow: AI narrator to MCP Server (agentic tool-use) -->
-  <line x1="444" y1="372" x2="402" y2="395" stroke="#b45309" stroke-width="1.5" marker-end="url(#arrA)"/>
-  <text x="430" y="388" text-anchor="middle" font-size="9" fill="#b45309">tool-use</text>
-
-  <!-- Arrow: MCP Server runs SPL against Splunk -->
-  <line x1="309" y1="360" x2="309" y2="322" stroke="#b45309" stroke-width="1.5" marker-end="url(#arrA)"/>
-  <text x="326" y="344" text-anchor="start" font-size="9" fill="#b45309">runs SPL</text>
-
-  <!-- External threat intel -->
-  <rect x="20" y="360" width="180" height="120" rx="6" fill="#f9fafb" stroke="#374151" stroke-width="1.5"/>
-  <text x="110" y="385" text-anchor="middle" font-size="13" font-weight="600" fill="#111827">External Intel</text>
-  <text x="110" y="408" text-anchor="middle" font-size="11" fill="#6b7280">CISA KEV</text>
-  <text x="110" y="427" text-anchor="middle" font-size="11" fill="#6b7280">NVD (CVE)</text>
-  <text x="110" y="446" text-anchor="middle" font-size="11" fill="#6b7280">MITRE ATT&amp;CK</text>
-  <text x="110" y="468" text-anchor="middle" font-size="9" font-style="italic" fill="#9ca3af">bundled snapshot fallback</text>
-
-  <!-- Arrow: threat-intel agent to External Intel -->
-  <line x1="444" y1="378" x2="202" y2="408" stroke="#b45309" stroke-width="1.5" marker-end="url(#arrA)"/>
-  <text x="320" y="398" text-anchor="middle" font-size="9" fill="#b45309">intel agent: lookup KEV / CVE / technique</text>
-
-  <!-- Legend -->
-  <rect x="20" y="500" width="1019" height="42" rx="6" fill="#f9fafb" stroke="#e5e7eb" stroke-width="1"/>
-  <rect x="36" y="514" width="16" height="14" rx="2" fill="#dbeafe" stroke="#93c5fd"/>
-  <text x="60" y="526" font-size="11" fill="#374151">Pure Go (no LLM)</text>
-  <rect x="190" y="514" width="16" height="14" rx="2" fill="#fef3c7" stroke="#f59e0b"/>
-  <text x="214" y="526" font-size="11" fill="#374151">AI seam (LLM / agent tool-use)</text>
-  <rect x="430" y="514" width="16" height="14" rx="2" fill="#dcfce7" stroke="#047857"/>
-  <text x="454" y="526" font-size="11" fill="#374151">Narration LLM (Gemini)</text>
-  <line x1="640" y1="521" x2="672" y2="521" stroke="#374151" stroke-width="1.5" marker-end="url(#arr)"/>
-  <text x="680" y="526" font-size="11" fill="#374151">data flow</text>
-  <line x1="770" y1="521" x2="802" y2="521" stroke="#b45309" stroke-width="1.5" marker-end="url(#arrA)"/>
-  <text x="810" y="526" font-size="11" fill="#374151">agent tool-use (enrichment only)</text>
+  <!-- ============ Legend ============ -->
+  <rect x="30" y="572" width="1060" height="48" rx="8" fill="#f8fafc" stroke="#e2e8f0" stroke-width="1"/>
+  <rect x="46" y="589" width="15" height="14" rx="2" fill="#eff6ff" stroke="#bfdbfe"/>
+  <text x="69" y="600" font-size="11" fill="#334155">Pure Go subcomponent (no LLM)</text>
+  <rect x="290" y="589" width="15" height="14" rx="2" fill="#fffbeb" stroke="#f59e0b"/>
+  <text x="313" y="600" font-size="11" fill="#334155">AI seam (LLM hop)</text>
+  <rect x="460" y="589" width="15" height="14" rx="2" fill="#ecfdf5" stroke="#047857"/>
+  <text x="483" y="600" font-size="11" fill="#334155">Gemini model</text>
+  <line x1="610" y1="596" x2="642" y2="596" stroke="#334155" stroke-width="1.5" marker-end="url(#arr)"/>
+  <text x="650" y="600" font-size="11" fill="#334155">data flow</text>
+  <line x1="760" y1="596" x2="792" y2="596" stroke="#b45309" stroke-width="1.5" marker-end="url(#arrA)"/>
+  <text x="800" y="600" font-size="11" fill="#334155">AI request / response</text>
 </svg>
