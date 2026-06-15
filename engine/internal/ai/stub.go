@@ -26,26 +26,153 @@ func (s *StubNarrator) Narrate(_ context.Context, chain types.ChainResultPayload
 	emit.emit(types.AgentActivityPayload{Kind: "done", Label: "Stub narration (no live enrichment)"})
 	if len(chain.Steps) == 0 {
 		return types.NarrationPayload{
-			Text:    "No chain available to narrate.",
-			Actions: []string{},
+			Text:           "No chain available to narrate.",
+			KeyFindings:    []string{},
+			AffectedAssets: []string{},
+			Hypotheses:     []string{},
+			Actions:        []types.NarrationAction{},
 		}, nil
 	}
 	var parts []string
 	for _, step := range chain.Steps {
 		parts = append(parts, step.Description)
 	}
-	text := fmt.Sprintf("Detected a %d-step causal chain (confidence %.2f): %s.",
-		len(chain.Steps), chain.Confidence, strings.Join(parts, "; "))
+	text := fmt.Sprintf("Reconstructed a %d-step causal chain (confidence %.0f%%) spanning %s. %s",
+		len(chain.Steps), chain.Confidence*100, stubTacticsPhrase(chain), strings.Join(parts, "; ")+".")
 	return types.NarrationPayload{
-		Text: text,
+		Text:           text,
+		Severity:       stubSeverity(chain),
+		KeyFindings:    stubKeyFindings(chain),
+		AffectedAssets: stubAffectedAssets(chain),
 		Hypotheses: []string{
-			"Stub narrator output: wire ClaudeNarrator for production hypotheses.",
+			"Adjacent hosts the same account touched may also be compromised; pivot from the implicated identities.",
+			"Stub narration is deterministic. Configure the Gemini narrator (set an API key) for live, evidence-backed hypotheses.",
 		},
-		Actions: []string{
-			"Review the highest-confidence chain step in the UI.",
-		},
-		Phases: stubPhases(chain),
+		Actions: stubActions(chain),
+		Phases:  stubPhases(chain),
 	}, nil
+}
+
+// stubTacticsPhrase renders the chain's tactic progression as a readable
+// clause, e.g. "Initial Access -> Credential Access -> Lateral Movement".
+func stubTacticsPhrase(chain types.ChainResultPayload) string {
+	tactics := chain.Tactics
+	if len(tactics) == 0 {
+		seen := map[string]bool{}
+		for _, st := range chain.Steps {
+			if st.Tactic != "" && !seen[st.Tactic] {
+				seen[st.Tactic] = true
+				tactics = append(tactics, st.Tactic)
+			}
+		}
+	}
+	if len(tactics) == 0 {
+		return "the observed activity"
+	}
+	return strings.Join(tactics, " -> ")
+}
+
+// stubSeverity maps the chain onto a coarse severity band. High-impact tactics
+// (credential access, lateral movement, domain or impact phases) escalate the
+// band beyond what confidence alone would suggest.
+func stubSeverity(chain types.ChainResultPayload) string {
+	escalating := false
+	for _, st := range chain.Steps {
+		t := strings.ToLower(st.Tactic)
+		if strings.Contains(t, "credential") || strings.Contains(t, "lateral") ||
+			strings.Contains(t, "domain") || strings.Contains(t, "impact") ||
+			strings.Contains(t, "privilege") {
+			escalating = true
+			break
+		}
+	}
+	switch {
+	case escalating && chain.Confidence >= 0.8:
+		return "critical"
+	case escalating || chain.Confidence >= 0.85:
+		return "high"
+	case chain.Confidence >= 0.6:
+		return "medium"
+	default:
+		return "low"
+	}
+}
+
+// stubKeyFindings surfaces the most load-bearing chain steps as findings,
+// tagging each with its technique when the engine mapped one.
+func stubKeyFindings(chain types.ChainResultPayload) []string {
+	const max = 4
+	findings := make([]string, 0, max)
+	for _, st := range chain.Steps {
+		if len(findings) >= max {
+			break
+		}
+		f := st.Description
+		if st.TechniqueName != "" {
+			f = fmt.Sprintf("%s (%s)", f, st.TechniqueName)
+		}
+		findings = append(findings, f)
+	}
+	return findings
+}
+
+// assetPattern matches process images (foo.exe) and host-style identifiers
+// (DC01, WS01, SRV-02) inside step descriptions so the stub can list the assets
+// implicated without an LLM.
+var assetPattern = regexp.MustCompile(`\b[\w.-]+\.exe\b|\b[A-Z]{2,}[0-9]{1,}[\w-]*\b`)
+
+// stubAffectedAssets extracts distinct asset-like tokens from the step
+// descriptions, preserving first-seen order and capping the list.
+func stubAffectedAssets(chain types.ChainResultPayload) []string {
+	const max = 8
+	seen := map[string]bool{}
+	assets := make([]string, 0, max)
+	for _, st := range chain.Steps {
+		for _, m := range assetPattern.FindAllString(st.Description, -1) {
+			key := strings.ToLower(m)
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+			assets = append(assets, m)
+			if len(assets) >= max {
+				return assets
+			}
+		}
+	}
+	return assets
+}
+
+// stubActions returns a deterministic, prioritized response checklist keyed to
+// the tactics present in the chain, so ai-off mode still renders actionable
+// guidance.
+func stubActions(chain types.ChainResultPayload) []types.NarrationAction {
+	tactics := strings.ToLower(stubTacticsPhrase(chain))
+	actions := []types.NarrationAction{{
+		Priority:  "immediate",
+		Action:    "Isolate the hosts named in Affected Assets from the network.",
+		Rationale: "Containment stops the chain from progressing while you investigate.",
+	}}
+	if strings.Contains(tactics, "credential") {
+		actions = append(actions, types.NarrationAction{
+			Priority:  "high",
+			Action:    "Force-reset credentials for every account observed in the chain and rotate Kerberos keys.",
+			Rationale: "Credential access means harvested secrets may already be reused elsewhere.",
+		})
+	}
+	if strings.Contains(tactics, "lateral") || strings.Contains(tactics, "domain") {
+		actions = append(actions, types.NarrationAction{
+			Priority:  "high",
+			Action:    "Review domain controller authentication logs for the implicated accounts.",
+			Rationale: "Lateral movement toward the domain suggests attempted privileged access.",
+		})
+	}
+	actions = append(actions, types.NarrationAction{
+		Priority:  "medium",
+		Action:    "Preserve the raw events behind each chain edge for forensic review.",
+		Rationale: "The evidence underpins the reconstruction and any follow-on response.",
+	})
+	return actions
 }
 
 var nonSlugChars = regexp.MustCompile(`[^a-z0-9]+`)

@@ -180,16 +180,23 @@
     "type": "narration",
     "payload": {
       "incident_id": "inc-0",
-      "text": "A macro-enabled Office document opened by a user on WS01 spawned PowerShell, which immediately accessed the LSASS process to dump credential material. The attacker used the extracted Kerberos ticket to authenticate to DC01 as a domain administrator, completing a pass-the-ticket lateral movement to the Domain Controller.",
+      "text": "A macro-enabled Office document opened by a user on WS01 spawned PowerShell, which immediately accessed the LSASS process to dump credential material. The attacker reused the extracted Kerberos ticket to authenticate to DC01 as a domain administrator, completing a pass-the-ticket lateral movement to the Domain Controller.",
+      "severity": "critical",
+      "key_findings": [
+        "PowerShell launched by WINWORD read LSASS memory on WS01 (LSASS Memory, T1003.001), indicating in-memory credential theft.",
+        "A Kerberos ticket from WS01 authenticated to DC01 as NORTHPOLE\\Administrator (Pass the Ticket, T1550.003).",
+        "The chain terminates at the Domain Controller, so the blast radius is the entire domain."
+      ],
+      "affected_assets": ["WS01", "DC01", "NORTHPOLE\\Administrator", "powershell.exe", "lsass.exe"],
       "hypotheses": [
-        "Credential material may have been exfiltrated before network telemetry began capturing outbound traffic",
-        "Additional workstations may have been compromised using the same ticket before DC01 authentication was observed"
+        "Credential material may have been exfiltrated before network telemetry began capturing outbound traffic.",
+        "Additional workstations may have been compromised using the same ticket before DC01 authentication was observed."
       ],
       "actions": [
-        "Isolate WS01 from the network immediately",
-        "Reset credentials for NORTHPOLE\\Administrator and all accounts with recent Kerberos activity from WS01",
-        "Search for lateral movement originating from DC01 after timestamp 1749100090",
-        "Revoke all active Kerberos tickets issued to WS01 in the affected window"
+        {"priority": "immediate", "action": "Isolate WS01 from the network.", "rationale": "WS01 is the entry point and the source of the stolen ticket; isolating it halts further reuse."},
+        {"priority": "immediate", "action": "Revoke active Kerberos tickets issued to WS01 and reset the krbtgt account twice.", "rationale": "A stolen TGT stays valid until tickets are invalidated, even after the host is contained."},
+        {"priority": "high", "action": "Force-reset NORTHPOLE\\Administrator and every account with recent Kerberos activity from WS01.", "rationale": "These credentials are presumed compromised after the LSASS dump."},
+        {"priority": "medium", "action": "Hunt for lateral movement originating from DC01 after timestamp 1749100090.", "rationale": "DC01 access may have been used to pivot further into the domain."}
       ],
       "phases": [
         { "id": "initial-access", "title": "Initial Access", "summary": "A macro-enabled Office document opened on WS01 spawned a hidden, encoded PowerShell process." },
@@ -284,8 +291,17 @@
     "payload": {
       "incident_id": "inc-1",
       "text": "A second intrusion on WS02: a macro-laden Office document spawned PowerShell, which launched rundll32.exe, a common signed-binary proxy-execution pattern.",
-      "hypotheses": ["The rundll32 invocation may side-load a malicious DLL not yet captured by image-load telemetry"],
-      "actions": ["Capture the rundll32 command line on WS02", "Isolate WS02 pending review"],
+      "severity": "high",
+      "key_findings": [
+        "WINWORD on WS02 spawned PowerShell under NORTHPOLE\\asmith, matching the WS01 initial-access pattern.",
+        "PowerShell launched rundll32.exe (Rundll32, T1218.011), a signed-binary proxy-execution technique used to mask payloads."
+      ],
+      "affected_assets": ["WS02", "NORTHPOLE\\asmith", "powershell.exe", "rundll32.exe"],
+      "hypotheses": ["The rundll32 invocation may side-load a malicious DLL not yet captured by image-load telemetry."],
+      "actions": [
+        {"priority": "immediate", "action": "Isolate WS02 pending review.", "rationale": "WS02 shows the same entry pattern as the confirmed WS01 compromise."},
+        {"priority": "high", "action": "Capture and analyze the rundll32 command line on WS02.", "rationale": "The arguments reveal which DLL and entry point were proxied, confirming or ruling out malice."}
+      ],
       "phases": [
         { "id": "execution", "title": "Execution", "summary": "A macro-laden Office document on WS02 spawned PowerShell under the asmith account." },
         { "id": "defense-evasion", "title": "Defense Evasion", "summary": "PowerShell launched rundll32.exe, hiding the payload behind a signed Windows binary." }

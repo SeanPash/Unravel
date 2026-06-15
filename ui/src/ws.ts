@@ -78,11 +78,23 @@ export interface NarrationPhase {
   summary: string
 }
 
+// One prioritized response step. priority is "immediate" | "high" | "medium" |
+// "low"; rationale is a one-line justification.
+export interface NarrationAction {
+  priority: string
+  action: string
+  rationale: string
+}
+
 export interface NarrationPayload {
   incident_id?: string
   text: string
+  // Grounded overall severity: "low" | "medium" | "high" | "critical".
+  severity?: string
+  key_findings?: string[]
+  affected_assets?: string[]
   hypotheses: string[]
-  actions: string[]
+  actions: NarrationAction[]
   phases?: NarrationPhase[]
 }
 
