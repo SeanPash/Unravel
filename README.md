@@ -70,6 +70,10 @@ Unravel is built to live inside Splunk in three distinct ways:
 
 ## How the AI is used
 
+![AI agent architecture](ai-architecture.svg)
+
+The diagram above is the deep-dive companion to the top-level [architecture.svg](architecture.svg): it zooms into the AI seam and shows exactly how the two agents work, the tool-use loop, the read-only SPL guard, the Splunk MCP/SAIA routing, and the deterministic fallbacks.
+
 Two agents sit at the seam, both built on Gemini 3.1 Flash Lite (Google). The static system-instruction prefix benefits from Gemini's implicit context caching:
 
 **Narrator.** Receives the extracted chain as structured JSON. Before it writes a word, it can run up to three rounds of tool calls to enrich its own context, and each tool builds and runs a real SPL query through a Splunk searcher:
@@ -216,7 +220,7 @@ The front end (React + Cytoscape.js, embedded in the engine binary) is built to 
 
 **AI integration.** The narration LLM is Google Gemini 3.1 Flash Lite, used as an agent: it runs tool-use rounds to enrich its own context (process reputation, logon history, raw events, MITRE/KEV/NVD intel) before writing a word. Crucially it never decides what the attack chain is; the Go engine made that decision before the first token. With no keys at all, the narrator falls back to a deterministic stub and the intel agent to a bundled ATT&CK snapshot, so every tab still works.
 
-**Required deliverables.** Open-source license ([MIT](LICENSE)), this README with full setup and run instructions, and the architecture diagram ([architecture.svg](architecture.svg)) in the repo root showing the Splunk interaction, the AI seam, and the data flow between components.
+**Required deliverables.** Open-source license ([MIT](LICENSE)), this README with full setup and run instructions, and the architecture diagram ([architecture.svg](architecture.svg)) in the repo root showing the Splunk interaction, the AI seam, and the data flow between components, plus a deep-dive AI agent diagram ([ai-architecture.svg](ai-architecture.svg)) detailing the agents' tool-use loops, the read-only SPL guard, and the Splunk MCP/SAIA routing.
 
 ## Repository layout
 
@@ -224,6 +228,7 @@ The front end (React + Cytoscape.js, embedded in the engine binary) is built to 
 .
 ├── README.md                         this file
 ├── architecture.svg                  architecture diagram
+├── ai-architecture.svg               AI agent deep-dive diagram
 ├── causal-reconstruction-engine.md   detailed design doc
 ├── LICENSE                           MIT
 ├── spec/                             implementation specs
