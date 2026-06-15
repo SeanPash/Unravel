@@ -153,6 +153,19 @@ export function computeDegrees(edges: WsEdge[]): Map<string, number> {
   return degrees
 }
 
+// Whether both of an edge's endpoints have already been created in the graph.
+// Cytoscape throws synchronously when asked to add an edge whose source or
+// target node does not exist, so an edge must wait until both endpoints are
+// present. Endpoints legitimately lag their edge in the stream when a client
+// connects mid-replay and missed the earlier node-creating messages; such an
+// edge is deferred and retried on the next graph_update rather than added now.
+export function edgeEndpointsPresent(
+  edge: { src: string; dst: string },
+  presentNodeIds: Set<string>,
+): boolean {
+  return presentNodeIds.has(edge.src) && presentNodeIds.has(edge.dst)
+}
+
 // Returns the set of edge timestamps that are part of the chain
 export function chainTimestamps(chain: ChainResultPayload | null): Set<number> {
   if (!chain) return new Set()
@@ -546,7 +559,7 @@ interface OpenInspector {
 // the graph canvas. The drag grip is the header only, so chips, relation
 // rows, and scrolling inside the body stay ordinary clicks.
 function DraggableInspector({
-  entry, context, zIndex, focused, container,
+  entry, context, zIndex, focused, container, width,
   onMove, onSelect, onClose, onNodeFocus, onPhaseSelect, onTechniqueSelect, onEventOpen,
 }: {
   entry: OpenInspector
@@ -554,6 +567,7 @@ function DraggableInspector({
   zIndex: number
   focused: boolean
   container: HTMLDivElement | null
+  width: number
   onMove: (x: number, y: number) => void
   onSelect: (e: React.PointerEvent) => void
   onClose: () => void
@@ -567,7 +581,7 @@ function DraggableInspector({
     <NodeInspector
       context={context}
       focused={focused}
-      style={{ left: entry.x, top: entry.y, zIndex }}
+      style={{ left: entry.x, top: entry.y, zIndex, width }}
       onPanelPointerDown={onSelect}
       headerProps={{
         onPointerDown: (e) => {
@@ -583,7 +597,7 @@ function DraggableInspector({
           // Keep at least a grabbable sliver of the panel inside the canvas.
           const rect = container?.getBoundingClientRect()
           if (rect && rect.width > 0) {
-            x = Math.min(Math.max(x, 8 - INSPECTOR_WIDTH + 60), rect.width - 60)
+            x = Math.min(Math.max(x, 8 - width + 60), rect.width - 60)
             y = Math.min(Math.max(y, 0), rect.height - 36)
           }
           onMove(x, y)
@@ -600,6 +614,10 @@ function DraggableInspector({
 }
 
 const INSPECTOR_WIDTH = 290
+// Bounds for the panel-responsive inspector width: a narrow graph cell keeps
+// drawers grabbable, a wide one keeps them from ballooning.
+const INSPECTOR_WIDTH_MIN = 240
+const INSPECTOR_WIDTH_MAX = 360
 // Cascade offset for each newly opened drawer so they stack readably.
 const INSPECTOR_CASCADE = 26
 
@@ -634,7 +652,17 @@ export function GraphView({
   // aspect ratio so it reads as a true scaled-down view. Keeps the minimap
   // small when the graph section is small and lets it grow when it is large.
   const [miniSize, setMiniSize] = useState<{ w: number; h: number }>({ w: 192, h: 128 })
+  // Inspector drawers scale with the graph panel so they neither overflow a
+  // small panel nor read as tiny in a large one. Derived from the panel width
+  // in the same measure pass as the minimap; clamped to a legible range.
+  const [inspectorWidth, setInspectorWidth] = useState(INSPECTOR_WIDTH)
   const [glows, setGlows] = useState<SectionGlow[]>([])
+  // The loading indicator is held visible for a minimum span once triggered.
+  // On the engine path a snapshot-on-connect flips the awaiting flags false
+  // within a frame, so without this floor the indicator would never render.
+  // `loadingHold` is true while the post-load minimum-visible timer runs; the
+  // timer callback (never a synchronous render/effect setState) clears it.
+  const [loadingHold, setLoadingHold] = useState(false)
   const assignmentRef = useRef<IncidentAssignment | null>(null)
   const sectionedIds = useRef(new Set<string>())
   const lastMiniAt = useRef(0)
@@ -670,6 +698,10 @@ export function GraphView({
       const mw = Math.round(clamp(w * 0.2, 96, 232))
       const mh = Math.round(clamp(mw * (h / w), 64, 188))
       setMiniSize((prev) => (prev.w === mw && prev.h === mh ? prev : { w: mw, h: mh }))
+      // Inspector width is a fraction of the panel, clamped so it stays
+      // grabbable on a narrow panel and never balloons on a wide one.
+      const iw = Math.round(clamp(w * 0.32, INSPECTOR_WIDTH_MIN, INSPECTOR_WIDTH_MAX))
+      setInspectorWidth((prev) => (prev === iw ? prev : iw))
     }
     measure()
     // ResizeObserver is absent in jsdom; the one-off measure above still runs.
@@ -678,6 +710,29 @@ export function GraphView({
     ro.observe(el)
     return () => ro.disconnect()
   }, [])
+
+  // Keep the loading indicator on screen for a minimum span. On the engine
+  // path a snapshot-on-connect flips the awaiting flags false within a frame,
+  // so without this floor the indicator would never visibly render. Both
+  // edges are driven from this effect: a rising edge latches the hold on (so
+  // a load resolving in the same frame still shows the "Loading" beat), a
+  // falling edge clears it once the minimum-visible floor has elapsed. All
+  // state writes happen in timer callbacks, never synchronously in the body.
+  const loadingShownAtRef = useRef(0)
+  useEffect(() => {
+    const MIN_VISIBLE_MS = 750
+    if (loading) {
+      loadingShownAtRef.current = performance.now()
+      const t = window.setTimeout(() => setLoadingHold(true), 0)
+      return () => window.clearTimeout(t)
+    }
+    const elapsed = performance.now() - loadingShownAtRef.current
+    const remaining = Math.max(0, MIN_VISIBLE_MS - elapsed)
+    const t = window.setTimeout(() => setLoadingHold(false), remaining)
+    return () => window.clearTimeout(t)
+  }, [loading])
+  // Visible whenever loading is live or the post-load minimum hold is latched.
+  const showLoading = loading || loadingHold
 
   // Snapshot of the map overlays: minimap content (section frames, orphan
   // nodes, related pairs, viewport) plus the focus fog circles for the
@@ -1122,21 +1177,27 @@ export function GraphView({
     }
 
     for (const e of edges) {
-      if (!addedEdgeIds.current.has(e.id)) {
-        addedEdgeIds.current.add(e.id)
-        newEls.push({
-          group: 'edges',
-          data: {
-            id: e.id,
-            source: e.src,
-            target: e.dst,
-            kind: e.kind,
-            ts: e.ts,
-            confidence: e.confidence,
-          },
-          classes: `entering ${band}`,
-        })
-      }
+      if (addedEdgeIds.current.has(e.id)) continue
+      // Defer any edge whose endpoints have not been created yet (an
+      // out-of-order or partial stream, e.g. a client that connected after
+      // replay began and missed the earlier node messages). Adding it now
+      // would throw inside cy.add and, with no error boundary, unmount the
+      // whole app. Leaving it out of addedEdgeIds means it is retried on the
+      // next graph_update, once its nodes have arrived.
+      if (!edgeEndpointsPresent(e, addedNodeIds.current)) continue
+      addedEdgeIds.current.add(e.id)
+      newEls.push({
+        group: 'edges',
+        data: {
+          id: e.id,
+          source: e.src,
+          target: e.dst,
+          kind: e.kind,
+          ts: e.ts,
+          confidence: e.confidence,
+        },
+        classes: `entering ${band}`,
+      })
     }
 
     if (newEls.length === 0) return
@@ -1430,7 +1491,7 @@ export function GraphView({
     updateInspectors(incidentKey, (cur) => {
       if (cur.some((i) => i.nodeId === focusedNodeId)) return cur
       const rect = containerRef.current?.getBoundingClientRect()
-      const baseX = rect && rect.width > 0 ? Math.max(12, rect.width - INSPECTOR_WIDTH - 64) : 12
+      const baseX = rect && rect.width > 0 ? Math.max(12, rect.width - inspectorWidth - 64) : 12
       const offset = (cur.length % 6) * INSPECTOR_CASCADE
       inspectorZRef.current += 1
       return [...cur, {
@@ -1440,8 +1501,7 @@ export function GraphView({
         z: inspectorZRef.current,
       }]
     })
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [focusedNodeId, incidentKey, activeIncidentId, updateInspectors])
+  }, [focusedNodeId, incidentKey, activeIncidentId, updateInspectors, inspectorWidth])
 
   function moveInspector(nodeId: string, x: number, y: number) {
     updateInspectors(displayKey, (cur) => cur.map((i) => (i.nodeId === nodeId ? { ...i, x, y } : i)))
@@ -1686,7 +1746,7 @@ export function GraphView({
             onHoverIncident={handleMiniHoverIncident}
           />
         )}
-        {loading && (
+        {showLoading && (
           <div className="graph-loading" role="status" aria-live="polite">
             <ArrowsClockwise
               className="graph-loading-icon"
@@ -1761,6 +1821,7 @@ export function GraphView({
             zIndex={entry.z}
             focused={entry.nodeId === focusedNodeId}
             container={containerRef.current}
+            width={inspectorWidth}
             onMove={(x, y) => moveInspector(entry.nodeId, x, y)}
             onSelect={(e) => selectInspector(entry.nodeId, e)}
             onClose={() => closeInspector(entry.nodeId)}
