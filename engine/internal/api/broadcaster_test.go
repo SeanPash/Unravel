@@ -50,7 +50,9 @@ func TestBroadcasterFansOutToAllSubscribers(t *testing.T) {
 
 func TestBroadcasterDropsSlowClient(t *testing.T) {
 	t.Parallel()
-	b := NewBroadcaster()
+	// No backlog: the outbox capacity is exactly SlowClientBuffer, so the drop
+	// threshold is deterministic and independent of snapshot seeding.
+	b := NewBroadcasterWithBacklog(0)
 	defer b.Close()
 	sub := b.Subscribe()
 	msg := mustMessage(t, types.ScoreUpdatePayload{})
@@ -90,6 +92,107 @@ func TestBroadcasterUnsubscribeIsIdempotent(t *testing.T) {
 	sub.Unsubscribe() // must not panic
 	if b.Count() != 0 {
 		t.Fatalf("count = %d", b.Count())
+	}
+}
+
+func TestBroadcasterReplaysBacklogToLateSubscriber(t *testing.T) {
+	t.Parallel()
+	b := NewBroadcaster()
+	defer b.Close()
+
+	// Send several messages with no subscriber connected (e.g. a replay that
+	// finished before the browser opened).
+	want := []string{"e1", "e2", "e3", "e4"}
+	for _, id := range want {
+		b.Send(mustMessage(t, types.ScoreUpdatePayload{EdgeID: id}))
+	}
+
+	// A client that joins now must receive the earlier messages, in order,
+	// before any live message.
+	sub := b.Subscribe()
+	for i, edgeID := range want {
+		select {
+		case got := <-sub.Out():
+			var p types.ScoreUpdatePayload
+			if err := json.Unmarshal(got.Payload, &p); err != nil {
+				t.Fatalf("backlog %d payload: %v", i, err)
+			}
+			if p.EdgeID != edgeID {
+				t.Fatalf("backlog %d edge = %q, want %q", i, p.EdgeID, edgeID)
+			}
+		case <-time.After(time.Second):
+			t.Fatalf("late subscriber did not receive backlog message %d (%s)", i, edgeID)
+		}
+	}
+
+	// Live delivery continues exactly from the end of the backlog: a new Send
+	// arrives next, with nothing lost or duplicated across the seam.
+	b.Send(mustMessage(t, types.ScoreUpdatePayload{EdgeID: "e5"}))
+	select {
+	case got := <-sub.Out():
+		var p types.ScoreUpdatePayload
+		if err := json.Unmarshal(got.Payload, &p); err != nil {
+			t.Fatalf("live payload: %v", err)
+		}
+		if p.EdgeID != "e5" {
+			t.Fatalf("live edge = %q, want e5", p.EdgeID)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("late subscriber did not receive live message after backlog")
+	}
+}
+
+func TestBroadcasterBacklogIsCapped(t *testing.T) {
+	t.Parallel()
+	const cap = 3
+	b := NewBroadcasterWithBacklog(cap)
+	defer b.Close()
+
+	// Send more than the cap with no subscriber connected.
+	for _, id := range []string{"e1", "e2", "e3", "e4", "e5"} {
+		b.Send(mustMessage(t, types.ScoreUpdatePayload{EdgeID: id}))
+	}
+	if got := b.BacklogLen(); got != cap {
+		t.Fatalf("BacklogLen = %d, want %d", got, cap)
+	}
+
+	// A late subscriber sees the most recent window (oldest evicted), in order.
+	sub := b.Subscribe()
+	want := []string{"e3", "e4", "e5"}
+	for i, edgeID := range want {
+		select {
+		case got := <-sub.Out():
+			var p types.ScoreUpdatePayload
+			if err := json.Unmarshal(got.Payload, &p); err != nil {
+				t.Fatalf("backlog %d payload: %v", i, err)
+			}
+			if p.EdgeID != edgeID {
+				t.Fatalf("backlog %d edge = %q, want %q", i, p.EdgeID, edgeID)
+			}
+		case <-time.After(time.Second):
+			t.Fatalf("did not receive capped backlog message %d (%s)", i, edgeID)
+		}
+	}
+	select {
+	case extra := <-sub.Out():
+		t.Fatalf("unexpected extra backlog message: %+v", extra)
+	default:
+	}
+}
+
+func TestBroadcasterNoBacklogWhenDisabled(t *testing.T) {
+	t.Parallel()
+	b := NewBroadcasterWithBacklog(0)
+	defer b.Close()
+	b.Send(mustMessage(t, types.ScoreUpdatePayload{EdgeID: "e1"}))
+	if got := b.BacklogLen(); got != 0 {
+		t.Fatalf("BacklogLen = %d, want 0", got)
+	}
+	sub := b.Subscribe()
+	select {
+	case got := <-sub.Out():
+		t.Fatalf("disabled backlog still replayed: %+v", got)
+	case <-time.After(50 * time.Millisecond):
 	}
 }
 
