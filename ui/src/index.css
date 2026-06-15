@@ -185,27 +185,38 @@ body {
 
 .narr-action-head {
   display: flex;
-  align-items: baseline;
+  align-items: flex-start;
   gap: var(--space-2);
 }
 
 .narr-prio {
   flex: none;
+  /* Fixed column so the action text starts at the same x for every priority
+     (IMMEDIATE and MEDIUM are different widths). */
+  min-width: 72px;
+  box-sizing: border-box;
+  text-align: center;
+  /* Nudge down so the pill optically centers on the first line of text rather
+     than sitting on its baseline and cutting into it. */
+  margin-top: 2px;
   font-family: var(--font-mono);
   font-size: 8.5px;
   font-weight: 600;
   letter-spacing: 0.1em;
   text-transform: uppercase;
-  padding: 1px 6px;
+  white-space: nowrap;
+  padding: 2px 6px;
   border-radius: var(--radius);
   border: 1px solid currentColor;
   line-height: 1.4;
 }
 
 .narr-action-text {
+  flex: 1;
+  min-width: 0;
   color: var(--text-primary);
   font-size: 13px;
-  line-height: 1.45;
+  line-height: 1.5;
 }
 
 .narr-action-why {

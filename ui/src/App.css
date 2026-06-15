@@ -3109,3 +3109,29 @@ body.dash-resizing-nwse * {
     transition: none;
   }
 }
+
+/* Containment action layout: stack the priority badge on its own line above
+   the action text rather than beside it. The side-by-side layout (defined in
+   index.css) crowded the wrapping text and cut into it. Overriding here keeps
+   the priority color coding from index.css untouched while giving each action
+   a clean badge-above-text rhythm. App.css loads after index.css, so these
+   rules win on equal specificity. */
+.narr-action-head {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-1);
+}
+
+.narr-prio {
+  /* Drop the fixed-width column and centering hacks that only existed to align
+     a left-side badge; as a stacked badge it hugs its own content, top-left. */
+  min-width: 0;
+  margin-top: 0;
+  text-align: left;
+}
+
+.narr-action-text {
+  /* No longer sharing a row, so the flex-fill is unnecessary; the text simply
+     fills the action's width below the badge. */
+  flex: none;
+}
