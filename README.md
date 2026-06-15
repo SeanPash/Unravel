@@ -129,7 +129,45 @@ cd engine
 
 When MCP enrichment is enabled, the narrator can also call `splunk_nl_search`: it asks the Splunk MCP Server's AI Assistant (`saia_generate_spl`) to turn a natural-language question into SPL, then runs that SPL through `splunk_run_query`. The activity feed shows both sub-steps: the AI Assistant writing the SPL, then the MCP server running it. The tool appears only in live+MCP mode and requires the Splunk AI Assistant to be enabled on the instance.
 
-`--insecure` skips TLS verification for the self-signed certs that GOAD and most lab Splunk installs use. Drop it for an instance with a CA-signed certificate. The `--hec-*` flags are optional; leave them off and the engine simply won't write findings back to Splunk.
+`--splunk-insecure` (alias `--insecure`) skips TLS verification for the self-signed certs that GOAD and most lab Splunk installs use. Drop it for an instance with a CA-signed certificate, or point `--splunk-ca-cert` at a PEM bundle for a corporate private CA. The `--hec-*` flags are optional; leave them off and the engine simply won't write findings back to Splunk.
+
+## Run flags
+
+Every flag has a sensible default, so `./engine --mode=replay` runs with no arguments. Secrets can be passed on the command line or through the matching environment variable; an explicit flag always wins.
+
+| Flag | Env | Default | What it does |
+|------|-----|---------|--------------|
+| `--mode` | | `replay` | Engine mode: `live`, `replay`, or `ai-off` |
+| `--bind` | | `127.0.0.1` | HTTP/WebSocket listen address |
+| `--port` | | `8080` | HTTP/WebSocket listen port |
+| `--api-token` | `SPLUNK_UNRAVEL_API_TOKEN` | empty | Shared bearer token required on the API; empty disables auth (fine for loopback) |
+| `--threshold` | | `0.5` | Suspicion score at which a connected component triggers chain extraction |
+| `--max-nodes` | | `0` | Cap the live graph at N nodes, evicting the least-recently-touched; `0` is unbounded |
+| `--incident-window` | | `0` | Scope the run to a trailing window. Replay keeps only events within the window of the timeline's last event; live (with no explicit earliest) sets `earliest_time=-<window>`. `0` is off |
+| `--incident-idle` | | `0` | Auto-finalize: after no new events for this long (including after a finite replay drains), the engine finalizes and shuts down cleanly. `0` is off |
+| `--retention` | | `0` | Age-based graph eviction: a background sweep evicts nodes whose newest event is older than this. Independent of `--max-nodes`; primarily meaningful in live mode. `0` is unbounded |
+| `--host-map` | | empty | Comma-separated `alias=canonical` pairs (case-insensitive) collapsing host aliases onto one node, e.g. `dc01=DC01.corp.local,10.0.0.5=DC01.corp.local` |
+| `--replay-speed` | | `1.0` | Timeline playback multiplier (replay/ai-off) |
+| `--testdata` | | `testdata` | Directory of replay timelines (`chain-*.json`) |
+| `--gemini-key` | `GEMINI_API_KEY` | empty | Google Gemini API key; omit to fall back to the deterministic stub narrator |
+| `--nvd-key` | `NVD_API_KEY` | empty | NVD API key to lift the CVE rate limit (optional) |
+| `--splunk-url` | | `https://localhost:8089` | Splunk REST base URL (live mode) |
+| `--splunk-token` | `SPLUNK_TOKEN` | empty | Splunk bearer token (required in live mode) |
+| `--splunk-search` | | `search index=sysmon` | SPL search expression to tail (live mode) |
+| `--earliest` | | empty | Canonical `earliest_time` bound. Live: REST export bound. Replay: scopes the canned timeline (`-15m`, an absolute time; `rt`/`now`/empty impose no replay bound). Falls back to `--splunk-earliest` |
+| `--latest` | | empty | Canonical `latest_time` bound; same dual live/replay behavior. Falls back to `--splunk-latest` |
+| `--splunk-earliest` | | `rt` | Accepted alias for `--earliest` (an explicit `--earliest` wins) |
+| `--splunk-latest` | | empty | Accepted alias for `--latest` |
+| `--splunk-mcp-url` | | empty | Splunk MCP Server endpoint; when set in live mode, narrator enrichment runs through the MCP server instead of REST |
+| `--splunk-mcp-token` | `SPLUNK_MCP_TOKEN` | empty | Splunk MCP Server bearer token (required when `--splunk-mcp-url` is set) |
+| `--splunk-insecure` | | `false` | Skip TLS verification for the Splunk REST/HEC/MCP endpoints (alias: `--insecure`) |
+| `--splunk-ca-cert` | | empty | Path to a PEM CA bundle to trust for the Splunk endpoints (corporate private CAs) |
+| `--hec-url` | | empty | Splunk HEC base URL for chain-result write-back, e.g. `https://splunk:8088`; empty disables write-back |
+| `--hec-token` | `SPLUNK_HEC_TOKEN` | empty | Splunk HEC token (required when `--hec-url` is set) |
+| `--hec-index` | | empty | Splunk index for HEC write-back; uses the token default when empty |
+| `--hec-sourcetype` | | `causal_chain_result` | Splunk sourcetype for HEC write-back |
+
+`./engine --help` prints the live list compiled into your binary, which is the source of truth if a flag here drifts.
 
 ## Tech stack
 
@@ -163,6 +201,22 @@ The front end (React + Cytoscape.js, embedded in the engine binary) is built to 
 | `replay` | Feeds a canned timeline through the full pipeline | No | Optional (for narration) |
 | `ai-off` | Same as replay, but skips every model call | No | No |
 | `live` | Streams from a real Splunk instance | Yes | Optional |
+
+## How this maps to the hackathon
+
+**Track: Security.** Unravel reconstructs an active intrusion (phishing to domain compromise) from live Splunk telemetry and tells the analyst what happened, why it matters, and what to do, while the attack is still in progress.
+
+**Splunk integration, three ways.**
+
+- *Consume:* live ingest tails Splunk's `services/search/jobs/export` REST endpoint, so the engine reads indexed events as they land.
+- *Write back:* reconstructed chains are posted to Splunk over the HTTP Event Collector (HEC) as notable events, so an analyst pivots from the engine's output straight back into raw logs.
+- *Splunk MCP Server:* in live mode with `--splunk-mcp-url` set, the AI narrator's evidence-gathering runs through the official Splunk MCP Server. Every SPL query it builds executes via the server's `splunk_run_query` tool over the MCP streamable-HTTP transport, and tool names are resolved from the server's `tools/list` on connect.
+
+**Splunk hosted models (Splunk AI Assistant / SAIA).** With MCP enabled, the narrator gains a `splunk_nl_search` tool: it hands a natural-language question to the Splunk AI Assistant's `saia_generate_spl` to generate SPL, then runs that generated SPL back through `splunk_run_query`. The activity feed shows both sub-steps, the AI Assistant writing the SPL and the MCP server running it. This is Splunk's own hosted model doing the search generation.
+
+**AI integration.** The narration LLM is Google Gemini 3.1 Flash Lite, used as an agent: it runs tool-use rounds to enrich its own context (process reputation, logon history, raw events, MITRE/KEV/NVD intel) before writing a word. Crucially it never decides what the attack chain is; the Go engine made that decision before the first token. With no keys at all, the narrator falls back to a deterministic stub and the intel agent to a bundled ATT&CK snapshot, so every tab still works.
+
+**Required deliverables.** Open-source license ([MIT](LICENSE)), this README with full setup and run instructions, and the architecture diagram ([architecture.svg](architecture.svg)) in the repo root showing the Splunk interaction, the AI seam, and the data flow between components.
 
 ## Repository layout
 

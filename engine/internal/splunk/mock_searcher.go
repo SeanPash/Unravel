@@ -52,3 +52,33 @@ func fixtureNameForQuery(query string) string {
 		return "fetch_raw_events"
 	}
 }
+
+// GenerateSPL lets the MockSearcher stand in for the Splunk AI Assistant in
+// replay mode so the demo shows the full natural-language-to-SPL agentic loop
+// (the narrator's splunk_nl_search tool is offered only when its Searcher
+// implements SPLGenerator). This is a deterministic, fixture-backed simulation,
+// NOT a live SAIA call: it maps the question to SPL by keyword so the generated
+// SPL then routes to the same enrichment fixtures Search reads. The honest
+// "replay fixture" source label is set by the caller (main.go) via
+// GeminiConfig.NLGenerateSource, so the activity feed never claims a live model
+// generated this SPL. Implementing this here keeps MockSearcher a drop-in
+// SPLGenerator alongside the live MCPSearcher, behind the same ai.SPLGenerator
+// seam.
+func (m *MockSearcher) GenerateSPL(_ context.Context, question string) (string, error) {
+	q := strings.ToLower(strings.TrimSpace(question))
+	if q == "" {
+		return "", fmt.Errorf("missing question")
+	}
+	switch {
+	case strings.Contains(q, "reputation") || strings.Contains(q, "malicious") ||
+		strings.Contains(q, "threat") || strings.Contains(q, "known bad") ||
+		strings.Contains(q, "flagged"):
+		return "search index=threat_intel | stats count by process reputation category", nil
+	case strings.Contains(q, "logon") || strings.Contains(q, "login") ||
+		strings.Contains(q, "sign in") || strings.Contains(q, "authentication") ||
+		strings.Contains(q, "failed") || strings.Contains(q, "account"):
+		return "search index=winsec (EventCode=4624 OR EventCode=4625) | table _time, EventCode, TargetUserName, IpAddress", nil
+	default:
+		return "search index=sysmon | head 50 | table _time, host, EventCode, Image, CommandLine", nil
+	}
+}

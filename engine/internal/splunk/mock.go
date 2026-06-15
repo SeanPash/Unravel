@@ -27,6 +27,13 @@ type MockSource struct {
 	closeOnce sync.Once
 	now      func() time.Time
 	sleep    func(time.Duration)
+
+	// Time-window scoping (the incident-triggered-pivot story in replay). Zero
+	// values disable the corresponding bound. Applied once, after the events are
+	// sorted, so the engine only ever sees the in-window slice of the timeline.
+	earliest       time.Time
+	latest         time.Time
+	incidentWindow time.Duration
 }
 
 // MockOption configures a MockSource at construction.
@@ -46,6 +53,26 @@ func withClock(now func() time.Time, sleep func(time.Duration)) MockOption {
 		m.now = now
 		m.sleep = sleep
 	}
+}
+
+// WithTimeBounds scopes replay to events whose timestamp falls in [earliest,
+// latest] (inclusive). A zero earliest means "from the start of the timeline";
+// a zero latest means "to the end". This backs --earliest/--latest in replay,
+// mirroring the Splunk earliest_time/latest_time bounds the live source honors.
+func WithTimeBounds(earliest, latest time.Time) MockOption {
+	return func(m *MockSource) {
+		m.earliest = earliest
+		m.latest = latest
+	}
+}
+
+// WithIncidentWindow scopes replay to the trailing window of the timeline: only
+// events within d of the timeline's last (latest, after any --latest cut) event
+// are replayed. This is the incident-triggered pivot in demo mode: the analyst
+// pivots into Unravel for the last d of activity on a host, not the full
+// history. A non-positive d disables the bound.
+func WithIncidentWindow(d time.Duration) MockOption {
+	return func(m *MockSource) { m.incidentWindow = d }
 }
 
 // NewMockFromFiles reads each timeline file, merges all entries, sorts them by
@@ -82,7 +109,43 @@ func NewMockFromEntries(kindEvents []RawEvent, opts ...MockOption) *MockSource {
 	sort.SliceStable(m.events, func(i, j int) bool {
 		return m.events[i].TS.Before(m.events[j].TS)
 	})
+	m.applyWindow()
 	return m
+}
+
+// applyWindow trims m.events to the configured time window. It runs once at
+// construction, after the events are sorted ascending, so the bounds compose:
+// the absolute [earliest, latest] cut is applied first, then the incident
+// window is measured from whatever the latest surviving event is.
+func (m *MockSource) applyWindow() {
+	if len(m.events) == 0 {
+		return
+	}
+	if !m.earliest.IsZero() || !m.latest.IsZero() {
+		kept := m.events[:0]
+		for _, e := range m.events {
+			if !m.earliest.IsZero() && e.TS.Before(m.earliest) {
+				continue
+			}
+			if !m.latest.IsZero() && e.TS.After(m.latest) {
+				continue
+			}
+			kept = append(kept, e)
+		}
+		m.events = kept
+	}
+	if m.incidentWindow > 0 && len(m.events) > 0 {
+		last := m.events[len(m.events)-1].TS
+		cutoff := last.Add(-m.incidentWindow)
+		kept := m.events[:0]
+		for _, e := range m.events {
+			if e.TS.Before(cutoff) {
+				continue
+			}
+			kept = append(kept, e)
+		}
+		m.events = kept
+	}
 }
 
 func newMock(entries []timelineEntry, opts ...MockOption) (*MockSource, error) {
