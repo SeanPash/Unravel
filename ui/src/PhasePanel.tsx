@@ -92,6 +92,15 @@ export function PhasePanel({ phases, activeFocusId, activeTechnique, narration, 
     )
   }
 
+  // Defend against malformed narration: a blank string finding/asset/hypothesis,
+  // or an action object missing its instruction text, would otherwise render as
+  // an empty row (a bare priority badge with nothing beside it). Filter them so a
+  // section only appears when it has real content.
+  const keyFindings = (narration?.key_findings ?? []).filter((f) => f.trim())
+  const affectedAssets = (narration?.affected_assets ?? []).filter((a) => a.trim())
+  const hypotheses = (narration?.hypotheses ?? []).filter((h) => h.trim())
+  const actions = (narration?.actions ?? []).filter((a) => a.action?.trim())
+
   return (
     <div className="phase-panel">
       <ol className="phase-list">
@@ -159,37 +168,37 @@ export function PhasePanel({ phases, activeFocusId, activeTechnique, narration, 
           {narration.text && <p className="narr-text">{narration.text}</p>}
         </section>
       )}
-      {narration && narration.key_findings && narration.key_findings.length > 0 && (
+      {keyFindings.length > 0 && (
         <section className="phase-notes">
           <h3>Key findings</h3>
           <ul className="narr-findings">
-            {narration.key_findings.map((f, i) => <li key={i}>{f}</li>)}
+            {keyFindings.map((f, i) => <li key={i}>{f}</li>)}
           </ul>
         </section>
       )}
-      {narration && narration.affected_assets && narration.affected_assets.length > 0 && (
+      {affectedAssets.length > 0 && (
         <section className="phase-notes">
           <h3>Affected assets</h3>
           <div className="narr-assets">
-            {narration.affected_assets.map((a, i) => (
+            {affectedAssets.map((a, i) => (
               <span key={i} className="narr-asset">{a}</span>
             ))}
           </div>
         </section>
       )}
-      {narration && narration.hypotheses.length > 0 && (
+      {hypotheses.length > 0 && (
         <section className="phase-notes">
           <h3>Hypotheses and missing evidence</h3>
           <ul className="narration-hypotheses">
-            {narration.hypotheses.map((h, i) => <li key={i}>{h}</li>)}
+            {hypotheses.map((h, i) => <li key={i}>{h}</li>)}
           </ul>
         </section>
       )}
-      {narration && narration.actions.length > 0 && (
+      {actions.length > 0 && (
         <section className="phase-notes">
           <h3>Containment actions</h3>
           <ol className="narr-actions">
-            {narration.actions.map((a, i) => (
+            {actions.map((a, i) => (
               <li key={i} className="narr-action">
                 <div className="narr-action-head">
                   <span className={`narr-prio narr-prio-${severityKey(a.priority)}`}>{a.priority}</span>

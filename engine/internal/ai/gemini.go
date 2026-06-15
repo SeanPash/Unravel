@@ -519,21 +519,43 @@ func parseNarration(text string) (types.NarrationPayload, error) {
 	if err := json.Unmarshal([]byte(stripFence(text)), &out); err != nil {
 		return types.NarrationPayload{}, fmt.Errorf("decode narration JSON: %w", err)
 	}
-	if out.KeyFindings == nil {
-		out.KeyFindings = []string{}
-	}
-	if out.AffectedAssets == nil {
-		out.AffectedAssets = []string{}
-	}
-	if out.Hypotheses == nil {
-		out.Hypotheses = []string{}
-	}
-	if out.Actions == nil {
-		out.Actions = []types.NarrationAction{}
-	}
+	// Drop blank list entries the model occasionally emits (an empty string, or
+	// an action object missing its fields after schema drift). An empty action
+	// would otherwise render in the UI as a bare priority badge with no text, so
+	// the report stays clean regardless of what the model returned.
+	out.KeyFindings = nonEmptyStrings(out.KeyFindings)
+	out.AffectedAssets = nonEmptyStrings(out.AffectedAssets)
+	out.Hypotheses = nonEmptyStrings(out.Hypotheses)
+	out.Actions = nonEmptyActions(out.Actions)
 	// The disclaimer is engine-authored, not model-authored, so the honesty
 	// caveat is always present and worded consistently regardless of what the
 	// model returned (it is told not to emit one).
 	out.Disclaimer = NarrationDisclaimer
 	return out, nil
+}
+
+// nonEmptyStrings returns a new, never-nil slice containing only the trimmed,
+// non-blank entries of in. Never-nil so the JSON payload stays well-formed
+// (an empty array, not null) for the UI.
+func nonEmptyStrings(in []string) []string {
+	out := make([]string, 0, len(in))
+	for _, s := range in {
+		if strings.TrimSpace(s) != "" {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+// nonEmptyActions returns a new, never-nil slice of the actions that carry
+// actual instruction text, dropping zero-value entries the model can emit when
+// its output drifts from the action schema.
+func nonEmptyActions(in []types.NarrationAction) []types.NarrationAction {
+	out := make([]types.NarrationAction, 0, len(in))
+	for _, a := range in {
+		if strings.TrimSpace(a.Action) != "" {
+			out = append(out, a)
+		}
+	}
+	return out
 }
