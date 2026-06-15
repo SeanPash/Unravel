@@ -58,13 +58,19 @@ Events flow left to right through seven stages. Only the last one calls a model.
 | 4 | **Temporal index** | Buckets edges by minute so "which edges touched node X in window [t1, t2]?" answers in `O(log n + k)` | No |
 | 5 | **Suspicion scorer** | Frequency-rarity (rare parent/child and auth tuples score high) × exponential temporal decay × structural lift for crossing host boundaries or touching sensitive nodes like `lsass.exe`. Updates incrementally and assigns stable incident IDs to connected components | No |
 | 6 | **Chain extractor** | When a component crosses the threshold, walks backward from the hottest node along highest-scored edges to recover the maximally suspicious path, then reverses it into chronological order with per-step confidence | No |
-| 7 | **AI narrator** | Turns the extracted chain into a 2–4 sentence narrative, missing-evidence hypotheses, and ranked containment actions | **Yes** |
+| 7 | **AI narrator** | Turns the extracted chain into a 2-4 sentence narrative, missing-evidence hypotheses, and ranked containment actions | **Yes** |
 
-The graph lives in a custom in-memory adjacency structure and snapshots periodically to BadgerDB. Findings flow back into Splunk as notable events over HEC when you point it at a `--hec-url`. The whole thing ships as one static Go binary with the React UI embedded inside it.
+The graph lives in a custom in-memory adjacency structure and snapshots periodically to BadgerDB. The whole thing ships as one static Go binary with the React UI embedded inside it.
+
+Unravel is built to live inside Splunk in three distinct ways:
+
+- **Live ingest** streams from Splunk's `services/search/jobs/export` REST endpoint in tail mode, so the engine consumes indexed events as they land.
+- **HEC write-back** returns the engine's reconstructed chain results to Splunk as notable events over the HTTP Event Collector when you point it at a `--hec-url`, so an analyst can pivot from the engine's output straight back into raw logs.
+- **Splunk MCP Server** is the AI narrator's evidence-gathering channel in live mode. When `--splunk-mcp-url` is set, every tool call the narrator makes to enrich its own context runs through the official Splunk MCP Server rather than the raw REST search endpoint.
 
 ## How the AI is used
 
-Two agents sit at the seam, both built on Claude Sonnet 4.6 with the static system prompt cached:
+Two agents sit at the seam, both built on Gemini 3.1 Flash Lite (Google). The static system-instruction prefix benefits from Gemini's implicit context caching:
 
 **Narrator.** Receives the extracted chain as structured JSON. Before it writes a word, it can run up to three rounds of tool calls to enrich its own context, and each tool builds and runs a real SPL query through a Splunk searcher:
 
@@ -73,6 +79,8 @@ Two agents sit at the seam, both built on Claude Sonnet 4.6 with the static syst
 - `fetch_raw_events` → pulls the raw logs behind specific event IDs
 
 **Threat-intel agent.** Enriches the chain's techniques against live external sources, again via tool calls: `lookup_technique_intel` (MITRE ATT&CK), `lookup_kev` (CISA Known Exploited Vulnerabilities), and `search_cve` (NVD). Returns matched techniques and CVEs with KEV/severity flags.
+
+**Routed through the Splunk MCP Server.** In live mode with `--splunk-mcp-url` set, the narrator's Splunk enrichment runs through the official Splunk MCP Server: each SPL query the narrator builds executes via the server's `splunk_run_query` tool over the MCP streamable-HTTP transport, instead of hitting the REST search endpoint directly. With MCP enabled the narrator also gains a `splunk_nl_search` tool: it hands a natural-language question to the Splunk AI Assistant (`saia_generate_spl`) to generate SPL, then runs that generated SPL back through `splunk_run_query`. The activity feed shows both sub-steps, the AI Assistant writing the SPL and the MCP server running it. The engine resolves the actual tool names from the server's `tools/list` on connect and degrades gracefully if the server renamed them or the AI Assistant is unlicensed. This is AI-assisted evidence gathering with Splunk's own MCP Server doing the search.
 
 The important part: the model only enriches its *own* input. It never decides what the attack chain is. That decision was already made by the Go engine before the first token was generated. And if you have no API key, the narrator falls back to a deterministic stub and the intel agent falls back to a bundled ATT&CK snapshot, so every tab in the UI still works with zero keys.
 
@@ -88,7 +96,7 @@ make release          # builds the React UI, then compiles it into the Go binary
 ./engine --mode=replay
 ```
 
-Open <http://localhost:8080>. The engine replays the phishing-to-DC timeline through ingest, scoring, and chain extraction, and streams the graph and narration to your browser over WebSocket. Add an `ANTHROPIC_API_KEY` to the environment for live narration, or run `--mode=ai-off` to skip the model entirely and watch the engine carry the demo on its own.
+Open <http://localhost:8080>. The engine replays the phishing-to-DC timeline through ingest, scoring, and chain extraction, and streams the graph and narration to your browser over WebSocket. Add a `GEMINI_API_KEY` to the environment for live narration, or run `--mode=ai-off` to skip the model entirely and watch the engine carry the demo on its own. With no key at all, the narrator falls back to a deterministic stub, so the full demo runs with zero keys.
 
 Want to iterate on just the UI? `cd ui && npm install && npm run mock` starts a standalone WebSocket server that replays a fixture, no engine needed.
 
@@ -103,7 +111,7 @@ cd engine
   --splunk-url=https://<splunk-host>:8089 \
   --splunk-token=<token> \
   --splunk-search="search index=sysmon" \
-  --anthropic-key=$ANTHROPIC_API_KEY \
+  --gemini-key=$GEMINI_API_KEY \
   --hec-url=https://<splunk-host>:8088 \
   --hec-token=<hec-token> \
   --insecure
@@ -116,7 +124,7 @@ cd engine
 ./engine --mode=live \
   --splunk-mcp-url=https://<splunk-host>/<mcp-endpoint> \
   --splunk-mcp-token=<mcp-encrypted-token> \
-  --anthropic-key=$ANTHROPIC_API_KEY --insecure
+  --gemini-key=$GEMINI_API_KEY --insecure
 ```
 
 When MCP enrichment is enabled, the narrator can also call `splunk_nl_search`: it asks the Splunk MCP Server's AI Assistant (`saia_generate_spl`) to turn a natural-language question into SPL, then runs that SPL through `splunk_run_query`. The activity feed shows both sub-steps: the AI Assistant writing the SPL, then the MCP server running it. The tool appears only in live+MCP mode and requires the Splunk AI Assistant to be enabled on the instance.
@@ -134,7 +142,7 @@ When MCP enrichment is enabled, the narrator can also call `splunk_nl_search`: i
 | Transport | `gorilla/websocket` | Mature, boring, reliable |
 | UI | React 18 + Vite + TypeScript | Fast iteration and type safety |
 | Graph view | Cytoscape.js + Cola layout | Animates well and holds up under a live demo |
-| Models | Claude Sonnet 4.6, prompt caching | Good cost/latency for a handful of call-sites; static schema preamble cached |
+| Models | Gemini 3.1 Flash Lite (Google) | Good cost/latency for a handful of call-sites; static system-instruction prefix benefits from implicit context caching |
 | Threat intel | CISA KEV + NVD | Live external enrichment, with a bundled snapshot as the offline fallback |
 
 ## The UI
@@ -176,7 +184,7 @@ The front end (React + Cytoscape.js, embedded in the engine binary) is built to 
 │       ├── chain/                    backward-walk chain extractor
 │       ├── mitre/                    deterministic ATT&CK technique mapping
 │       ├── splunk/                   REST source + searcher, mock source, HEC client
-│       ├── ai/                       Claude narrator + threat-intel agent, tool-use, stubs
+│       ├── ai/                       Gemini narrator + threat-intel agent, tool-use, stubs
 │       ├── intel/                    live KEV/NVD sources + mock fixtures
 │       ├── api/                      HTTP + WebSocket server, broadcaster, embedded UI
 │       └── pipeline/                 wires it all into the streaming loop

@@ -65,6 +65,17 @@ function confidenceBand(c: number): 'high' | 'medium' | 'low' {
   return 'low'
 }
 
+// severityKey normalizes a model-supplied severity or action priority label to
+// a known CSS modifier, defaulting unknown values to "medium" so an unexpected
+// string never produces an unstyled badge.
+function severityKey(label: string | undefined): string {
+  const k = (label ?? '').trim().toLowerCase()
+  if (k === 'critical' || k === 'immediate' || k === 'high' || k === 'medium' || k === 'low') {
+    return k
+  }
+  return 'medium'
+}
+
 export function PhasePanel({ phases, activeFocusId, activeTechnique, narration, awaitingNarration, onPhaseSelect }: PhasePanelProps) {
   if (phases.length === 0) {
     if (awaitingNarration) {
@@ -135,6 +146,37 @@ export function PhasePanel({ phases, activeFocusId, activeTechnique, narration, 
         })}
       </ol>
 
+      {narration && (narration.text || narration.severity) && (
+        <section className="phase-notes narr-summary">
+          <div className="narr-summary-head">
+            <h3>Incident summary</h3>
+            {narration.severity && (
+              <span className={`narr-severity narr-severity-${severityKey(narration.severity)}`}>
+                {narration.severity}
+              </span>
+            )}
+          </div>
+          {narration.text && <p className="narr-text">{narration.text}</p>}
+        </section>
+      )}
+      {narration && narration.key_findings && narration.key_findings.length > 0 && (
+        <section className="phase-notes">
+          <h3>Key findings</h3>
+          <ul className="narr-findings">
+            {narration.key_findings.map((f, i) => <li key={i}>{f}</li>)}
+          </ul>
+        </section>
+      )}
+      {narration && narration.affected_assets && narration.affected_assets.length > 0 && (
+        <section className="phase-notes">
+          <h3>Affected assets</h3>
+          <div className="narr-assets">
+            {narration.affected_assets.map((a, i) => (
+              <span key={i} className="narr-asset">{a}</span>
+            ))}
+          </div>
+        </section>
+      )}
       {narration && narration.hypotheses.length > 0 && (
         <section className="phase-notes">
           <h3>Missing evidence</h3>
@@ -145,9 +187,17 @@ export function PhasePanel({ phases, activeFocusId, activeTechnique, narration, 
       )}
       {narration && narration.actions.length > 0 && (
         <section className="phase-notes">
-          <h3>Containment actions</h3>
-          <ol className="narration-actions">
-            {narration.actions.map((a, i) => <li key={i}>{a}</li>)}
+          <h3>Recommended actions</h3>
+          <ol className="narr-actions">
+            {narration.actions.map((a, i) => (
+              <li key={i} className="narr-action">
+                <div className="narr-action-head">
+                  <span className={`narr-prio narr-prio-${severityKey(a.priority)}`}>{a.priority}</span>
+                  <span className="narr-action-text">{a.action}</span>
+                </div>
+                {a.rationale && <p className="narr-action-why">{a.rationale}</p>}
+              </li>
+            ))}
           </ol>
         </section>
       )}

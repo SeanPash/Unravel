@@ -69,7 +69,7 @@ func TestRESTSearcherReturnsResults(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	s := NewRESTSearcher(srv.URL, "test-token", false)
+	s := NewRESTSearcher(srv.URL, "test-token", false, nil)
 	rows, err := s.Search(context.Background(), `search index=threat_intel process_name="lsass.exe" | head 5`)
 	if err != nil {
 		t.Fatal(err)
@@ -89,7 +89,7 @@ func TestRESTSearcherReturnsErrorOnNon2xx(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	s := NewRESTSearcher(srv.URL, "bad-token", false)
+	s := NewRESTSearcher(srv.URL, "bad-token", false, nil)
 	if _, err := s.Search(context.Background(), "search index=*"); err == nil {
 		t.Fatal("want error on 401, got nil")
 	}
