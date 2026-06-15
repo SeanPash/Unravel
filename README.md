@@ -84,6 +84,25 @@ Two agents sit at the seam, both built on Gemini 3.1 Flash Lite (Google). The st
 
 The important part: the model only enriches its *own* input. It never decides what the attack chain is. That decision was already made by the Go engine before the first token was generated. And if you have no API key, the narrator falls back to a deterministic stub and the intel agent falls back to a bundled ATT&CK snapshot, so every tab in the UI still works with zero keys.
 
+## The fastest way in: type `unravel`
+
+If you just want to point Unravel at your own Splunk and watch it work, install it and run the wizard:
+
+```bash
+cd engine
+make install     # builds the binary and installs it to ~/.local/bin/unravel
+unravel          # first run: a short menu
+```
+
+The first run offers two paths:
+
+- **Connect to my Splunk** asks for your Splunk REST URL, a bearer token (typed without echo), and whether the certificate is self-signed. It checks the connection, saves it to `~/.unravel/config.json` (file mode `0600`), launches live mode, and opens the UI in your browser.
+- **Try the demo** runs the canned kill chain in replay mode, no setup needed.
+
+After the first connect, just type `unravel` again and it reads the saved config and goes straight to the live UI. Run `unravel setup` any time to re-enter the wizard and change the connection. (`make install` puts the binary in `~/.local/bin`; make sure that directory is on your `PATH`.)
+
+Narration can work out of the box: a Gemini API key may be embedded into the binary at build time. Drop it in `engine/gemini.key` (gitignored) before `make`, and the wizard path lights up the AI tabs with zero extra setup. A `--gemini-key` flag or `GEMINI_API_KEY` env var still overrides it. Note that a key compiled into a distributed binary is recoverable from it (for example with `strings`), so treat embedding as a convenience for a controlled audience, not as production secret management.
+
 ## Quickstart
 
 You don't need a Splunk instance or a virtual lab to see the whole thing run. Replay mode feeds a canned kill chain through the real pipeline.
@@ -93,7 +112,7 @@ You don't need a Splunk instance or a virtual lab to see the whole thing run. Re
 ```bash
 cd engine
 make release          # builds the React UI, then compiles it into the Go binary
-./engine --mode=replay
+./unravel --mode=replay
 ```
 
 Open <http://localhost:8080>. The engine replays the phishing-to-DC timeline through ingest, scoring, and chain extraction, and streams the graph and narration to your browser over WebSocket. Add a `GEMINI_API_KEY` to the environment for live narration, or run `--mode=ai-off` to skip the model entirely and watch the engine carry the demo on its own. With no key at all, the narrator falls back to a deterministic stub, so the full demo runs with zero keys.
@@ -106,7 +125,7 @@ Point the engine at a real Splunk deployment:
 
 ```bash
 cd engine
-./engine \
+./unravel \
   --mode=live \
   --splunk-url=https://<splunk-host>:8089 \
   --splunk-token=<token> \
@@ -117,11 +136,13 @@ cd engine
   --insecure
 ```
 
+Passing any flag (including `--mode`) runs the engine directly and bypasses the wizard, so existing scripts and the commands above are unchanged. The wizard is only the front door for a bare `unravel` with no saved config.
+
 To route the narrator's Splunk enrichment through the official Splunk MCP Server instead of the REST search endpoint, add `--splunk-mcp-url` and `--splunk-mcp-token`. The MCP token is a separate per-app encrypted credential, not the same as `--splunk-token`.
 
 ```bash
 cd engine
-./engine --mode=live \
+./unravel --mode=live \
   --splunk-mcp-url=https://<splunk-host>/<mcp-endpoint> \
   --splunk-mcp-token=<mcp-encrypted-token> \
   --gemini-key=$GEMINI_API_KEY --insecure
@@ -133,7 +154,7 @@ When MCP enrichment is enabled, the narrator can also call `splunk_nl_search`: i
 
 ## Run flags
 
-Every flag has a sensible default, so `./engine --mode=replay` runs with no arguments. Secrets can be passed on the command line or through the matching environment variable; an explicit flag always wins.
+Every flag has a sensible default, so `./unravel --mode=replay` runs with no arguments. A bare `unravel` (no flags) instead opens the setup wizard or, with a saved `~/.unravel/config.json`, launches live mode directly. Secrets can be passed on the command line or through the matching environment variable; an explicit flag always wins, and `--gemini-key` also falls back to a key embedded at build time.
 
 | Flag | Env | Default | What it does |
 |------|-----|---------|--------------|
@@ -167,7 +188,7 @@ Every flag has a sensible default, so `./engine --mode=replay` runs with no argu
 | `--hec-index` | | empty | Splunk index for HEC write-back; uses the token default when empty |
 | `--hec-sourcetype` | | `causal_chain_result` | Splunk sourcetype for HEC write-back |
 
-`./engine --help` prints the live list compiled into your binary, which is the source of truth if a flag here drifts.
+`./unravel --help` prints the live list compiled into your binary, which is the source of truth if a flag here drifts.
 
 ## Tech stack
 
@@ -241,7 +262,8 @@ The front end (React + Cytoscape.js, embedded in the engine binary) is built to 
 │       ├── ai/                       Gemini narrator + threat-intel agent, tool-use, stubs
 │       ├── intel/                    live KEV/NVD sources + mock fixtures
 │       ├── api/                      HTTP + WebSocket server, broadcaster, embedded UI
-│       └── pipeline/                 wires it all into the streaming loop
+│       ├── pipeline/                 wires it all into the streaming loop
+│       └── setup/                    first-run setup wizard: config file, prompts, browser open
 │
 └── ui/                               React + Vite + TypeScript front end
     └── src/                          graph view, panels, time scrubber, incident map, ws client

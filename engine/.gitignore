@@ -1,4 +1,9 @@
-# Compiled engine binary (build artifact from `go build` / `make release`)
+# Compiled binary (build artifact from `go build` / `make release` / `make install`)
+/unravel
+/unravel-fresh
+# Legacy / ad-hoc build outputs
 /engine
-# Ad-hoc compiled binary (e.g. `go build -o engine-fresh`)
 /engine-fresh
+# Build-time embedded Gemini API key (also matched by the root *.key rule).
+# Never commit this; it is baked into the binary via -ldflags at build time.
+/gemini.key

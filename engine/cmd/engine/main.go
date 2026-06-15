@@ -8,6 +8,7 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -28,8 +29,19 @@ import (
 	"github.com/luigifernandez/unravel/engine/internal/intel"
 	"github.com/luigifernandez/unravel/engine/internal/pipeline"
 	"github.com/luigifernandez/unravel/engine/internal/scorer"
+	"github.com/luigifernandez/unravel/engine/internal/setup"
 	"github.com/luigifernandez/unravel/engine/internal/splunk"
+	"golang.org/x/term"
 )
+
+// embeddedGeminiKey is an optional Gemini API key compiled into the binary at
+// build time via -ldflags "-X main.embeddedGeminiKey=<key>" (sourced from a
+// gitignored secret file, never committed). It is empty in a plain `go build`,
+// in which case the engine falls back to the stub narrator. Runtime precedence
+// is --gemini-key flag > GEMINI_API_KEY env > this embedded key > stub. A key
+// baked into a distributed binary is extractable from it, so this is a
+// controlled-distribution convenience, not a production secret-management pattern.
+var embeddedGeminiKey string
 
 type config struct {
 	mode           string
@@ -71,9 +83,35 @@ type config struct {
 }
 
 func main() {
-	cfg := parseFlags()
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	slog.SetDefault(logger)
+
+	// `unravel setup` forces the interactive wizard regardless of any saved
+	// config. It is handled before flag parsing because the flag package has no
+	// subcommand support and would mishandle a leading non-flag argument.
+	if isSetupSubcommand(os.Args[1:]) {
+		os.Exit(runSetup(logger))
+	}
+
+	cfg, set := parseFlags()
+	resolveGeminiKey(&cfg)
+
+	// A bare `unravel` (no flags) is the setup-wizard front door. Any explicit
+	// flag (including --mode=...) keeps the original behavior byte-for-byte:
+	// no config load, no prompt, no auto-browser.
+	openBrowser := false
+	if len(set) == 0 {
+		var err error
+		cfg, openBrowser, err = resolveBareInvocation(cfg, logger)
+		if err != nil {
+			logger.Error("setup failed", "err", err)
+			os.Exit(1)
+		}
+	}
+
+	if openBrowser {
+		go openBrowserWhenReady(cfg)
+	}
 
 	if err := run(cfg, logger); err != nil {
 		logger.Error("engine exited with error", "err", err)
@@ -81,7 +119,189 @@ func main() {
 	}
 }
 
-func parseFlags() config {
+// isSetupSubcommand reports whether the args invoke the `setup` subcommand.
+func isSetupSubcommand(args []string) bool {
+	return len(args) > 0 && args[0] == "setup"
+}
+
+// resolveGeminiKey applies the build-time embedded Gemini key as the lowest-
+// priority fallback. cfg.apiKey already holds the --gemini-key flag value or the
+// GEMINI_API_KEY env default after parseFlags, so this only fills a still-empty
+// key, yielding precedence flag > env > embedded > "" (stub).
+func resolveGeminiKey(cfg *config) {
+	if cfg.apiKey == "" {
+		cfg.apiKey = embeddedGeminiKey
+	}
+}
+
+// resolveBareInvocation handles a flagless `unravel`. With a saved config it
+// goes straight to live mode; otherwise it runs the first-run menu and, for the
+// connect path, the Splunk wizard. It returns the resolved config and whether to
+// auto-open the browser (true for interactive launches). The demo path persists
+// nothing. Explicit-flag invocations never reach here.
+func resolveBareInvocation(cfg config, logger *slog.Logger) (config, bool, error) {
+	path, err := setup.ConfigPath()
+	if err != nil {
+		return cfg, false, err
+	}
+	saved, err := setup.Load(path)
+	if errors.Is(err, setup.ErrCorruptConfig) {
+		logger.Warn("saved config is unreadable; re-running setup", "path", path, "err", err)
+		saved = nil
+	} else if err != nil {
+		return cfg, false, err
+	}
+
+	if saved != nil {
+		applySetupConfig(&cfg, saved)
+		cfg.mode = "live"
+		logger.Info("loaded saved Splunk connection", "path", path, "url", saved.SplunkURL)
+		return cfg, true, nil
+	}
+
+	// First run (or recovered-from-corrupt): an interactive terminal is required.
+	if !term.IsTerminal(int(os.Stdin.Fd())) {
+		printNonInteractiveUsage()
+		os.Exit(2)
+	}
+
+	wiz := setup.NewTerminalWizard(makeProbe())
+	choice, err := wiz.Menu()
+	if err != nil {
+		return cfg, false, fmt.Errorf("read menu choice: %w", err)
+	}
+	if choice == setup.ChoiceDemo {
+		cfg.mode = "replay" // persist nothing; demo is stateless
+		return cfg, true, nil
+	}
+
+	collected, err := wiz.Run()
+	if err != nil {
+		return cfg, false, err
+	}
+	if err := setup.Save(path, collected); err != nil {
+		return cfg, false, fmt.Errorf("save config: %w", err)
+	}
+	logger.Info("saved Splunk connection", "path", path)
+	applySetupConfig(&cfg, collected)
+	cfg.mode = "live"
+	return cfg, true, nil
+}
+
+// runSetup drives `unravel setup`: it reconfigures the Splunk connection
+// directly (no menu), saves it, and launches live mode with the browser. It
+// returns the process exit code.
+func runSetup(logger *slog.Logger) int {
+	if !term.IsTerminal(int(os.Stdin.Fd())) {
+		printNonInteractiveUsage()
+		return 2
+	}
+	path, err := setup.ConfigPath()
+	if err != nil {
+		logger.Error("setup failed", "err", err)
+		return 1
+	}
+	collected, err := setup.NewTerminalWizard(makeProbe()).Run()
+	if err != nil {
+		logger.Error("setup failed", "err", err)
+		return 1
+	}
+	if err := setup.Save(path, collected); err != nil {
+		logger.Error("setup failed", "err", err)
+		return 1
+	}
+	logger.Info("saved Splunk connection", "path", path)
+
+	// Build a config with engine defaults (flag.Parse stops at the leading
+	// "setup" arg, so every flag keeps its default), then overlay the connection.
+	cfg, _ := parseFlags()
+	resolveGeminiKey(&cfg)
+	applySetupConfig(&cfg, collected)
+	cfg.mode = "live"
+
+	go openBrowserWhenReady(cfg)
+	if err := run(cfg, logger); err != nil {
+		logger.Error("engine exited with error", "err", err)
+		return 1
+	}
+	return 0
+}
+
+// makeProbe adapts the engine's startup connectivity check into the wizard's
+// ProbeFunc so the wizard validates a connection exactly as live mode will.
+func makeProbe() setup.ProbeFunc {
+	return func(splunkURL, token string, insecure bool) error {
+		c := config{splunkURL: splunkURL, splunkToken: token, splunkInsecure: insecure}
+		tlsCfg, err := loadSplunkTLS(c) // no --splunk-ca-cert here -> (nil, nil)
+		if err != nil {
+			return err
+		}
+		return checkSplunk(c, tlsCfg)
+	}
+}
+
+// applySetupConfig overlays a saved/collected Splunk connection onto cfg. Only
+// the three wizard-owned fields are touched; everything else stays at its flag
+// default so the rest of run() behaves identically to a live invocation.
+func applySetupConfig(cfg *config, s *setup.Config) {
+	cfg.splunkURL = s.SplunkURL
+	cfg.splunkToken = s.SplunkToken
+	cfg.splunkInsecure = s.SplunkInsecure
+}
+
+// printNonInteractiveUsage explains how to run without a terminal (CI/pipes),
+// where the interactive wizard cannot prompt.
+func printNonInteractiveUsage() {
+	fmt.Fprintln(os.Stderr, "No saved configuration and stdin is not a terminal.")
+	fmt.Fprintln(os.Stderr, "Run 'unravel setup' in a terminal, or pass flags, for example:")
+	fmt.Fprintln(os.Stderr, "  unravel --mode=replay")
+	fmt.Fprintln(os.Stderr, "  unravel --mode=live --splunk-url=https://splunk:8089 --splunk-token=<token>")
+}
+
+// browserHost maps a bind address to a host a browser can actually reach: a
+// wildcard bind (0.0.0.0 / ::) becomes loopback, and IPv6 literals are bracketed
+// for use in a URL and a dial address.
+func browserHost(bind string) string {
+	switch bind {
+	case "", "0.0.0.0":
+		return "127.0.0.1"
+	case "::", "[::]":
+		return "[::1]"
+	}
+	if ip := net.ParseIP(bind); ip != nil && ip.To4() == nil {
+		return "[" + bind + "]"
+	}
+	return bind
+}
+
+// openBrowserWhenReady waits for the HTTP server to accept connections, prints
+// the local URL, and best-effort opens it in the default browser. Opening is
+// non-fatal; the URL is always printed.
+func openBrowserWhenReady(cfg config) {
+	host := browserHost(cfg.bind)
+	addr := fmt.Sprintf("%s:%d", host, cfg.port)
+	waitForListen(addr, 5*time.Second)
+	url := fmt.Sprintf("http://%s:%d", host, cfg.port)
+	fmt.Fprintf(os.Stdout, "Open %s in your browser\n", url)
+	_ = setup.Open(url)
+}
+
+// waitForListen polls addr until a TCP connection succeeds or the timeout
+// elapses. It returns whether the listener became reachable.
+func waitForListen(addr string, timeout time.Duration) bool {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		conn, err := net.DialTimeout("tcp", addr, 200*time.Millisecond)
+		if err == nil {
+			conn.Close()
+			return true
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	return false
+}
+
+func parseFlags() (config, map[string]bool) {
 	var cfg config
 	var deprecatedInsecure bool
 	flag.StringVar(&cfg.mode, "mode", "replay", "engine mode: live | replay | ai-off")
@@ -116,14 +336,19 @@ func parseFlags() config {
 	flag.StringVar(&cfg.hecSourcetype, "hec-sourcetype", "causal_chain_result", "Splunk sourcetype for HEC write-back")
 	flag.Parse()
 
+	// Capture which flags the operator explicitly set. An empty set means a bare
+	// `unravel` invocation, which routes to the setup wizard.
+	set := map[string]bool{}
+	flag.Visit(func(f *flag.Flag) { set[f.Name] = true })
+
 	// --insecure stays a deprecated alias: either flag turns it on.
 	if deprecatedInsecure {
 		cfg.splunkInsecure = true
 	}
 
-	reconcileTimeBounds(&cfg)
+	reconcileTimeBounds(&cfg, set)
 	applySecretEnvFallbacks(&cfg)
-	return cfg
+	return cfg, set
 }
 
 // reconcileTimeBounds makes --earliest/--latest the canonical time bounds while
@@ -132,10 +357,7 @@ func parseFlags() config {
 // the alias (so the live source, which reads cfg.splunkEarliest/Latest, still
 // sees the right value) and vice versa, so both names end up holding the same
 // resolved bound regardless of which the operator typed.
-func reconcileTimeBounds(cfg *config) {
-	set := map[string]bool{}
-	flag.Visit(func(f *flag.Flag) { set[f.Name] = true })
-
+func reconcileTimeBounds(cfg *config, set map[string]bool) {
 	switch {
 	case set["earliest"]:
 		// Canonical wins; mirror onto the alias so the live REST source honors it.
@@ -469,11 +691,13 @@ func loadSplunkTLS(cfg config) (*tls.Config, error) {
 	return &tls.Config{RootCAs: pool}, nil
 }
 
-// probeSplunk performs a synchronous connectivity check against the Splunk REST
-// API so a bad host/port/token fails loudly at startup instead of silently
-// ingesting nothing. Non-fatal: it logs a prominent warning and lets the engine
-// continue (the reconnect loop will keep trying).
-func probeSplunk(cfg config, tlsCfg *tls.Config, logger *slog.Logger) {
+// checkSplunk performs a synchronous connectivity check against the Splunk REST
+// API and returns an error describing any failure. The error text references the
+// URL, status, and response body only, never the bearer token, so callers (the
+// setup wizard) can safely surface it to the user. It is the single source of
+// truth for "is this a good Splunk connection", shared by the startup probe and
+// the wizard.
+func checkSplunk(cfg config, tlsCfg *tls.Config) error {
 	endpoint := strings.TrimRight(cfg.splunkURL, "/") + "/services/server/info?output_mode=json"
 	client := &http.Client{
 		Timeout: 10 * time.Second,
@@ -485,23 +709,30 @@ func probeSplunk(cfg config, tlsCfg *tls.Config, logger *slog.Logger) {
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
-		logger.Warn("splunk connectivity probe could not be built", "err", err)
-		return
+		return fmt.Errorf("build probe request: %w", err)
 	}
 	req.Header.Set("Authorization", "Bearer "+cfg.splunkToken)
 	resp, err := client.Do(req)
 	if err != nil {
-		logger.Warn("splunk connectivity probe failed; check --splunk-url and network reachability", "url", cfg.splunkURL, "err", err)
-		return
+		return fmt.Errorf("connect to %s: %w", cfg.splunkURL, err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
-		logger.Warn("splunk connectivity probe was rejected; check --splunk-token", "status", resp.StatusCode)
-		return
+		return fmt.Errorf("authentication rejected (status %d); check the token", resp.StatusCode)
 	}
 	if resp.StatusCode/100 != 2 {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
-		logger.Warn("splunk connectivity probe returned non-2xx", "status", resp.StatusCode, "body", strings.TrimSpace(string(body)))
+		return fmt.Errorf("unexpected status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+	return nil
+}
+
+// probeSplunk wraps checkSplunk for the startup path: a bad host/port/token logs
+// a prominent warning and lets the engine continue (the reconnect loop keeps
+// trying) instead of failing the process.
+func probeSplunk(cfg config, tlsCfg *tls.Config, logger *slog.Logger) {
+	if err := checkSplunk(cfg, tlsCfg); err != nil {
+		logger.Warn("splunk connectivity probe failed; continuing (reconnect loop will retry)", "url", cfg.splunkURL, "err", err)
 		return
 	}
 	logger.Info("splunk connectivity probe ok", "url", cfg.splunkURL)
