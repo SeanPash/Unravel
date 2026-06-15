@@ -196,6 +196,18 @@ export function desiredEdgeLength(kind: string): number {
 // --bg-panel = #12171c, --bg-page = #0c0d10
 
 const CY_STYLE = [
+  // Kill Cytoscape's default tap-and-hold indicator: the translucent gray
+  // disc it paints on the background while the mouse button is held. We pan
+  // on drag, so the disc only ever reads as a stray dark blob.
+  {
+    selector: 'core',
+    style: {
+      'active-bg-opacity': 0,
+      'active-bg-size': 0,
+      'selection-box-opacity': 0,
+      'selection-box-border-width': 0,
+    },
+  },
   // Base node: label layout shared by all nodes. Sizing and fill live on the
   // :childless rule so incident-section compounds can auto-size to their
   // children. Per-kind rules below override fill.
