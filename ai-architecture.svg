@@ -103,9 +103,10 @@
   <text x="602" y="406" font-size="9.5" font-style="italic" fill="#64748b">with a bundled-snapshot fallback when the network is unavailable.</text>
 
   <!-- ============ Shared Gemini loop ============ -->
-  <text x="560" y="486" text-anchor="middle" font-size="10" fill="#047857">each agent runs a function-calling loop, up to 3 rounds, until it returns final JSON</text>
   <line x1="290" y1="464" x2="468" y2="500" stroke="#047857" stroke-width="1.5" marker-end="url(#arrG)"/>
   <line x1="830" y1="464" x2="652" y2="500" stroke="#047857" stroke-width="1.5" marker-end="url(#arrG)"/>
+  <text x="560" y="478" text-anchor="middle" font-size="10" fill="#047857">each agent runs a function-calling loop, up to 3 rounds,</text>
+  <text x="560" y="491" text-anchor="middle" font-size="10" fill="#047857">until it returns final JSON</text>
 
   <rect x="460" y="500" width="200" height="86" rx="8" fill="#ecfdf5" stroke="#047857" stroke-width="1.5"/>
   <text x="560" y="524" text-anchor="middle" font-size="13" font-weight="700" fill="#065f46">Google Gemini</text>
@@ -146,9 +147,9 @@
 
   <!-- ============ Browser UI ============ -->
   <line x1="250" y1="464" x2="466" y2="710" stroke="#334155" stroke-width="1.4" marker-end="url(#arr)"/>
-  <text x="346" y="612" font-size="9" fill="#64748b">narration + activity (WS)</text>
+  <text x="470" y="636" text-anchor="middle" font-size="9" fill="#64748b">narration + activity (WS)</text>
   <line x1="870" y1="464" x2="654" y2="710" stroke="#334155" stroke-width="1.4" marker-end="url(#arr)"/>
-  <text x="774" y="612" text-anchor="end" font-size="9" fill="#64748b">threat-intel + activity (WS)</text>
+  <text x="652" y="636" text-anchor="middle" font-size="9" fill="#64748b">threat-intel + activity (WS)</text>
 
   <rect x="460" y="712" width="200" height="96" rx="8" fill="#f8fafc" stroke="#334155" stroke-width="1.5"/>
   <text x="560" y="736" text-anchor="middle" font-size="13" font-weight="700" fill="#0f172a">Browser UI</text>
