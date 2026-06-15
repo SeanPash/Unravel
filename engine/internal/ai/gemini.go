@@ -407,7 +407,14 @@ func toolResponseObject(content string) map[string]any {
 // --- Gemini wire types ---
 
 type geminiPart struct {
-	Text             string                  `json:"text,omitempty"`
+	Text string `json:"text,omitempty"`
+	// ThoughtSignature is an opaque token Gemini 3.x thinking models attach to the
+	// part carrying a functionCall. It MUST be echoed back verbatim when the model
+	// turn is replayed in the conversation history, or the next tool-use round is
+	// rejected with HTTP 400 ("Function call is missing a thought_signature").
+	// Capturing it here lets the part round-trip unchanged. See
+	// https://ai.google.dev/gemini-api/docs/thought-signatures
+	ThoughtSignature string                  `json:"thoughtSignature,omitempty"`
 	FunctionCall     *geminiFunctionCall     `json:"functionCall,omitempty"`
 	FunctionResponse *geminiFunctionResponse `json:"functionResponse,omitempty"`
 }
