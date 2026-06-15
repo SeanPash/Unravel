@@ -46,6 +46,8 @@ As each step fires, you watch the suspicion score climb and the causal graph ass
 
 ![Architecture](architecture.svg)
 
+`architecture.svg` (repo root) is the submission architecture diagram: it shows how Unravel reads from and writes back to Splunk, where the AI sits, and the data flow across components. [`ai-architecture.svg`](ai-architecture.svg) zooms into the AI seam.
+
 Events move left to right through seven stages. Only the last one calls a model.
 
 | # | Stage | What it does | LLM? |
