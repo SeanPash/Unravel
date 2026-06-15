@@ -88,7 +88,7 @@ func parseFlags() config {
 	flag.StringVar(&cfg.splunkCACert, "splunk-ca-cert", "", "path to a PEM CA bundle to trust for the Splunk REST/HEC/MCP endpoints (corporate private CAs)")
 	flag.Float64Var(&cfg.threshold, "threshold", 0.5, "scorer trigger threshold")
 	flag.IntVar(&cfg.maxNodes, "max-nodes", 0, "cap the live provenance graph at N nodes, evicting the least-recently-touched (0 means unbounded)")
-	flag.StringVar(&cfg.apiKey, "anthropic-key", os.Getenv("ANTHROPIC_API_KEY"), "Anthropic API key (omit to fall back to stub narrator)")
+	flag.StringVar(&cfg.apiKey, "gemini-key", os.Getenv("GEMINI_API_KEY"), "Google Gemini API key (omit to fall back to stub narrator)")
 	flag.StringVar(&cfg.nvdKey, "nvd-key", os.Getenv("NVD_API_KEY"), "NVD API key to lift the CVE rate limit (live mode, optional)")
 	flag.StringVar(&cfg.hecURL, "hec-url", "", "Splunk HEC base URL for chain result write-back, e.g. https://splunk:8088 (disabled when empty)")
 	flag.StringVar(&cfg.hecToken, "hec-token", "", "Splunk HEC token (required when --hec-url is set; env SPLUNK_HEC_TOKEN)")
@@ -107,7 +107,7 @@ func parseFlags() config {
 
 // applySecretEnvFallbacks fills empty token fields from the environment so
 // secrets need not be passed on the command line. An explicitly-set flag (a
-// non-empty field) always wins over the env, mirroring the ANTHROPIC_API_KEY /
+// non-empty field) always wins over the env, mirroring the GEMINI_API_KEY /
 // NVD_API_KEY pattern.
 func applySecretEnvFallbacks(cfg *config) {
 	if cfg.splunkToken == "" {
@@ -379,7 +379,7 @@ var _ ai.SPLGenerator = (*splunk.MCPSearcher)(nil)
 func buildNarrator(cfg config, tlsCfg *tls.Config, logger *slog.Logger) ai.Narrator {
 	if cfg.mode == "ai-off" || cfg.apiKey == "" {
 		if cfg.mode != "ai-off" {
-			logger.Info("anthropic key not set, falling back to stub narrator")
+			logger.Info("gemini key not set, falling back to stub narrator")
 		}
 		return ai.NewStub()
 	}
@@ -401,12 +401,12 @@ func buildNarrator(cfg config, tlsCfg *tls.Config, logger *slog.Logger) ai.Narra
 		searcherName = "Splunk (replay fixtures)"
 		logger.Info("narrator enrichment using mock fixtures", "testdata_dir", cfg.testdataDir)
 	}
-	return ai.NewClaude(ai.ClaudeConfig{APIKey: cfg.apiKey, Searcher: searcher, SearcherName: searcherName})
+	return ai.NewGemini(ai.GeminiConfig{APIKey: cfg.apiKey, Searcher: searcher, SearcherName: searcherName})
 }
 
 // buildIntelAgent mirrors buildNarrator: ai-off or a missing API key yields the
 // deterministic snapshot-only agent (no LLM, no network), so both new tabs work
-// with zero keys. With a key, the Claude agent uses the live KEV/NVD source in
+// with zero keys. With a key, the Gemini agent uses the live KEV/NVD source in
 // BOTH live and replay mode: the CISA KEV catalog is a keyless public fetch and
 // NVD is Splunk-independent, so the replay demo can truthfully show the agent
 // reaching out to an external threat database and cross-referencing the chain.
@@ -419,7 +419,7 @@ func buildIntelAgent(cfg config, logger *slog.Logger) ai.ThreatIntelAgent {
 	}
 	source := intel.NewRESTSource(intel.RESTConfig{NVDKey: cfg.nvdKey})
 	logger.Info("threat-intel agent enrichment using live KEV/NVD", "mode", cfg.mode)
-	return ai.NewClaudeIntel(ai.ClaudeIntelConfig{APIKey: cfg.apiKey, Source: source})
+	return ai.NewGeminiIntel(ai.GeminiIntelConfig{APIKey: cfg.apiKey, Source: source})
 }
 
 // discoverTimelines returns every root-level chain-*.json file in dir (the

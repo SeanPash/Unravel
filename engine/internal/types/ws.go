@@ -55,12 +55,28 @@ type NarrationPhase struct {
 	Summary string `json:"summary"`
 }
 
+// NarrationAction is one prioritized response step. Priority is one of
+// "immediate", "high", "medium", or "low". Rationale states, in one line, why
+// the step matters so a responder can triage without re-reading the chain.
+type NarrationAction struct {
+	Priority  string `json:"priority"`
+	Action    string `json:"action"`
+	Rationale string `json:"rationale"`
+}
+
+// NarrationPayload is the AI narrator's structured incident report. Only prose
+// fields come from the model; the engine still owns every graph reference
+// (node/edge ids, timestamps, confidence). Severity is the model's grounded
+// read of overall incident severity ("low" | "medium" | "high" | "critical").
 type NarrationPayload struct {
-	IncidentID string           `json:"incident_id,omitempty"`
-	Text       string           `json:"text"`
-	Hypotheses []string         `json:"hypotheses"`
-	Actions    []string         `json:"actions"`
-	Phases     []NarrationPhase `json:"phases,omitempty"`
+	IncidentID     string            `json:"incident_id,omitempty"`
+	Text           string            `json:"text"`
+	Severity       string            `json:"severity,omitempty"`
+	KeyFindings    []string          `json:"key_findings"`
+	AffectedAssets []string          `json:"affected_assets"`
+	Hypotheses     []string          `json:"hypotheses"`
+	Actions        []NarrationAction `json:"actions"`
+	Phases         []NarrationPhase  `json:"phases,omitempty"`
 }
 
 // LogEventPayload carries the raw Splunk event behind a graph edge so the UI
