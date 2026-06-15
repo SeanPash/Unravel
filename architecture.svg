@@ -124,7 +124,7 @@
   <text x="945" y="470" text-anchor="middle" font-size="10.5" fill="#047857">narrator + threat-intel agent</text>
   <text x="945" y="490" text-anchor="middle" font-size="10" fill="#475569">tool-use loop, max 3 rounds</text>
   <text x="945" y="512" text-anchor="middle" font-size="9.5" fill="#475569">static schema preamble, implicit cache</text>
-  <text x="945" y="532" text-anchor="middle" font-size="9.5" font-style="italic" fill="#94a3b8">tool calls: see agent-flow.svg</text>
+  <text x="945" y="532" text-anchor="middle" font-size="9.5" font-style="italic" fill="#94a3b8">tool calls: see ai-architecture.svg</text>
 
   <!-- ============ Legend ============ -->
   <rect x="30" y="572" width="1060" height="48" rx="8" fill="#f8fafc" stroke="#e2e8f0" stroke-width="1"/>
