@@ -1,6 +1,6 @@
 // Package ai is the only LLM-touching component in the engine. It wraps a
 // finished ChainResult plus the narrative-supporting metadata the pipeline
-// already computed, and asks Claude to produce a natural-language summary,
+// already computed, and asks Gemini to produce a natural-language summary,
 // hypotheses, and containment actions. All upstream subcomponents stay
 // LLM-free; this is the seam where structured engine output meets the model.
 package ai

@@ -78,8 +78,8 @@ func deterministicSummary(ids []string) string {
 	)
 }
 
-// ClaudeIntelConfig configures the live threat-intel agent. APIKey is required.
-type ClaudeIntelConfig struct {
+// GeminiIntelConfig configures the live threat-intel agent. APIKey is required.
+type GeminiIntelConfig struct {
 	APIKey     string
 	Model      string
 	BaseURL    string
@@ -88,27 +88,27 @@ type ClaudeIntelConfig struct {
 	Source     ThreatIntelSource
 }
 
-// ClaudeIntelAgent correlates the chain's techniques against the bundled ATT&CK
+// GeminiIntelAgent correlates the chain's techniques against the bundled ATT&CK
 // snapshot (lookup_technique_intel) plus live KEV/CVE (via Source), then writes
-// a remediation summary. It reuses the narrator's Claude tool-use plumbing.
-type ClaudeIntelAgent struct {
-	cfg ClaudeIntelConfig
+// a remediation summary. It reuses the narrator's Gemini tool-use plumbing.
+type GeminiIntelAgent struct {
+	cfg GeminiIntelConfig
 }
 
-func NewClaudeIntel(cfg ClaudeIntelConfig) *ClaudeIntelAgent {
+func NewGeminiIntel(cfg GeminiIntelConfig) *GeminiIntelAgent {
 	if cfg.Model == "" {
-		cfg.Model = claudeModel
+		cfg.Model = geminiModel
 	}
 	if cfg.BaseURL == "" {
-		cfg.BaseURL = claudeAPIBase
+		cfg.BaseURL = geminiAPIBase
 	}
 	if cfg.HTTPClient == nil {
 		cfg.HTTPClient = &http.Client{Timeout: 30 * time.Second}
 	}
 	if cfg.MaxTokens <= 0 {
-		cfg.MaxTokens = 1500
+		cfg.MaxTokens = 2048
 	}
-	return &ClaudeIntelAgent{cfg: cfg}
+	return &GeminiIntelAgent{cfg: cfg}
 }
 
 const intelSystemPrompt = `You are a threat-intelligence analyst. An upstream causal-graph engine reconstructed an attack chain and mapped its steps to MITRE ATT&CK techniques. Your job is to correlate those techniques against known threat intelligence and produce remediation guidance.
@@ -129,67 +129,62 @@ Use the tools, then respond with a SINGLE JSON object, no surrounding prose, mat
 
 Include one techniques entry per distinct technique in the chain. Keep cve_matches to genuinely relevant entries; an empty array is fine.`
 
-var intelTools = []claudeTool{
+var intelToolDecls = []geminiFunctionDecl{
 	{
 		Name:        "lookup_technique_intel",
 		Description: "ATT&CK groups, software, and mitigations for a technique ID.",
-		InputSchema: claudeToolSchema{
-			Type:       "object",
-			Properties: map[string]claudeSchemaProperty{"technique_id": {Type: "string", Description: "ATT&CK technique ID, e.g. T1003.001"}},
+		Parameters: geminiSchema{
+			Type:       "OBJECT",
+			Properties: map[string]geminiSchema{"technique_id": {Type: "STRING", Description: "ATT&CK technique ID, e.g. T1003.001"}},
 			Required:   []string{"technique_id"},
 		},
 	},
 	{
 		Name:        "lookup_kev",
 		Description: "Search the CISA Known Exploited Vulnerabilities catalog by keyword.",
-		InputSchema: claudeToolSchema{
-			Type:       "object",
-			Properties: map[string]claudeSchemaProperty{"keyword": {Type: "string", Description: "Search term, e.g. kerberos"}},
+		Parameters: geminiSchema{
+			Type:       "OBJECT",
+			Properties: map[string]geminiSchema{"keyword": {Type: "STRING", Description: "Search term, e.g. kerberos"}},
 			Required:   []string{"keyword"},
 		},
 	},
 	{
 		Name:        "search_cve",
 		Description: "Search the NVD CVE database by keyword.",
-		InputSchema: claudeToolSchema{
-			Type:       "object",
-			Properties: map[string]claudeSchemaProperty{"keyword": {Type: "string", Description: "Search term, e.g. lsass"}},
+		Parameters: geminiSchema{
+			Type:       "OBJECT",
+			Properties: map[string]geminiSchema{"keyword": {Type: "STRING", Description: "Search term, e.g. lsass"}},
 			Required:   []string{"keyword"},
 		},
 	},
 }
 
-func (a *ClaudeIntelAgent) Enrich(ctx context.Context, chain types.ChainResultPayload, emit ActivityFunc) (types.ThreatIntelPayload, error) {
+func (a *GeminiIntelAgent) Enrich(ctx context.Context, chain types.ChainResultPayload, emit ActivityFunc) (types.ThreatIntelPayload, error) {
 	chainJSON, err := json.Marshal(chain)
 	if err != nil {
 		return types.ThreatIntelPayload{}, fmt.Errorf("marshal chain: %w", err)
 	}
-	messages := []claudeMessage{{
-		Role:    "user",
-		Content: []claudeContentBlock{{Type: "text", Text: "Chain JSON:\n" + string(chainJSON)}},
+	contents := []geminiContent{{
+		Role:  "user",
+		Parts: []geminiPart{{Text: "Chain JSON:\n" + string(chainJSON)}},
 	}}
+	tools := []geminiTool{{FunctionDeclarations: intelToolDecls}}
 
 	for i := 0; i < maxRounds; i++ {
-		resp, err := postMessages(ctx, a.cfg.HTTPClient, a.cfg.BaseURL, a.cfg.APIKey, claudeRequest{
-			Model:     a.cfg.Model,
-			MaxTokens: a.cfg.MaxTokens,
-			System:    []claudeSystemBlock{{Type: "text", Text: intelSystemPrompt, CacheControl: &claudeCacheControl{Type: "ephemeral"}}},
-			Messages:  messages,
-			Tools:     intelTools,
+		resp, err := generateContent(ctx, a.cfg.HTTPClient, a.cfg.BaseURL, a.cfg.APIKey, a.cfg.Model, geminiRequest{
+			SystemInstruction: &geminiSystemInstruction{Parts: []geminiPart{{Text: intelSystemPrompt}}},
+			Contents:          contents,
+			Tools:             tools,
+			GenerationConfig:  &geminiGenerationConfig{MaxOutputTokens: a.cfg.MaxTokens},
 		})
 		if err != nil {
 			return types.ThreatIntelPayload{}, err
 		}
 
-		hasToolUse := false
-		for _, b := range resp.Content {
-			if b.Type == "tool_use" {
-				hasToolUse = true
-				break
-			}
-		}
-		if !hasToolUse {
-			payload, perr := parseIntel(extractText(resp))
+		parts := candidateParts(resp)
+		calls := functionCalls(parts)
+		if len(calls) == 0 {
+			payload, perr := parseIntel(extractText(parts))
 			if perr != nil {
 				return types.ThreatIntelPayload{}, perr
 			}
@@ -197,29 +192,24 @@ func (a *ClaudeIntelAgent) Enrich(ctx context.Context, chain types.ChainResultPa
 			return payload, nil
 		}
 
-		messages = append(messages, claudeMessage{Role: "assistant", Content: resp.Content})
-		var results []claudeContentBlock
-		for _, b := range resp.Content {
-			if b.Type != "tool_use" {
-				continue
-			}
-			label, source := toolCallActivity(b.Name, b.Input)
-			emit.emit(types.AgentActivityPayload{Kind: "tool_call", Tool: b.Name, Source: source, Label: label})
-			content := a.dispatchIntelTool(ctx, b.Name, b.Input)
-			detail, status := toolResultActivity(b.Name, content)
-			emit.emit(types.AgentActivityPayload{Kind: "tool_result", Tool: b.Name, Source: source, Label: label, Detail: detail, Status: status})
-			results = append(results, claudeContentBlock{
-				Type:      "tool_result",
-				ToolUseID: b.ID,
-				Content:   content,
+		contents = append(contents, geminiContent{Role: "model", Parts: parts})
+		var responseParts []geminiPart
+		for _, call := range calls {
+			label, source := toolCallActivity(call.Name, call.Args)
+			emit.emit(types.AgentActivityPayload{Kind: "tool_call", Tool: call.Name, Source: source, Label: label})
+			content := a.dispatchIntelTool(ctx, call.Name, call.Args)
+			detail, status := toolResultActivity(call.Name, content)
+			emit.emit(types.AgentActivityPayload{Kind: "tool_result", Tool: call.Name, Source: source, Label: label, Detail: detail, Status: status})
+			responseParts = append(responseParts, geminiPart{
+				FunctionResponse: &geminiFunctionResponse{Name: call.Name, Response: toolResponseObject(content)},
 			})
 		}
-		messages = append(messages, claudeMessage{Role: "user", Content: results})
+		contents = append(contents, geminiContent{Role: "user", Parts: responseParts})
 	}
 	return types.ThreatIntelPayload{}, fmt.Errorf("intel agent exceeded %d rounds", maxRounds)
 }
 
-func (a *ClaudeIntelAgent) dispatchIntelTool(ctx context.Context, name string, input map[string]any) string {
+func (a *GeminiIntelAgent) dispatchIntelTool(ctx context.Context, name string, input map[string]any) string {
 	switch name {
 	case "lookup_technique_intel":
 		id, _ := input["technique_id"].(string)
@@ -237,7 +227,7 @@ func (a *ClaudeIntelAgent) dispatchIntelTool(ctx context.Context, name string, i
 	}
 }
 
-func (a *ClaudeIntelAgent) cveResult(rows []types.CVEMatch, err error) string {
+func (a *GeminiIntelAgent) cveResult(rows []types.CVEMatch, err error) string {
 	if err != nil {
 		return `{"error":"intel source unavailable"}`
 	}
@@ -248,14 +238,8 @@ func (a *ClaudeIntelAgent) cveResult(rows []types.CVEMatch, err error) string {
 // parseIntel decodes the agent's final JSON, tolerating a markdown code fence,
 // and normalizes nil slices so the JSON sent to the UI is well-formed.
 func parseIntel(text string) (types.ThreatIntelPayload, error) {
-	body := strings.TrimSpace(text)
-	body = strings.TrimPrefix(body, "```json")
-	body = strings.TrimPrefix(body, "```")
-	body = strings.TrimSuffix(body, "```")
-	body = strings.TrimSpace(body)
-
 	var out types.ThreatIntelPayload
-	if err := json.Unmarshal([]byte(body), &out); err != nil {
+	if err := json.Unmarshal([]byte(stripFence(text)), &out); err != nil {
 		return types.ThreatIntelPayload{}, fmt.Errorf("decode intel JSON: %w", err)
 	}
 	if out.Status == "" {
