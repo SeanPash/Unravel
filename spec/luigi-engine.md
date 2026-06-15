@@ -17,7 +17,7 @@ engine/
 │   ├── scorer/                 online suspicion scorer
 │   ├── chain/                  backward-walk chain extractor
 │   ├── splunk/                 Source interface + MockSource + RESTSource
-│   ├── ai/                     Narrator interface + ClaudeNarrator
+│   ├── ai/                     Narrator interface + GeminiNarrator
 │   ├── api/                    HTTP server, WebSocket upgrade, broadcaster
 │   └── pipeline/               wires everything into the streaming loop
 ├── docs/adr/                   architecture decision records
@@ -104,7 +104,7 @@ type Narrator interface {
 ```
 
 - `StubNarrator`: returns a canned narration. Used when `--mode=ai-off`.
-- `ClaudeNarrator`: sends `ChainResult` as structured JSON to Claude Sonnet 4.6. Uses prompt caching on a static system prompt that embeds the engine output schema. Returns `Narration{ Text, Hypotheses []string, Actions []string }`.
+- `GeminiNarrator`: sends `ChainResult` as structured JSON to Gemini 3.1 Flash Lite. Uses a static system instruction that embeds the engine output schema, which benefits from Gemini's implicit context caching. Returns `Narration{ Text, Hypotheses []string, Actions []string }`.
 
 ### `api`
 
@@ -136,8 +136,8 @@ Controlled by `--mode` flag on the binary:
 
 | Mode | Source | Narrator |
 |---|---|---|
-| `live` (default) | `RESTSource` against real Splunk | `ClaudeNarrator` |
-| `replay` | `MockSource` reading `testdata/` | `ClaudeNarrator` |
+| `live` (default) | `RESTSource` against real Splunk | `GeminiNarrator` |
+| `replay` | `MockSource` reading `testdata/` | `GeminiNarrator` |
 | `ai-off` | `RESTSource` or `MockSource` | `StubNarrator` |
 
 `--replay-speed=1.0` scales event timestamps during replay (2.0 = double speed, 0.1 = slow-motion).
@@ -271,8 +271,8 @@ Run with: `go test ./...` from `engine/`
 ### AI narrator
 
 - [ ] `ai/stub.go`: `StubNarrator` with canned output
-- [ ] `ai/claude.go`: `ClaudeNarrator` with prompt caching
-- [ ] Unit test: `ClaudeNarrator` with a mocked HTTP transport
+- [ ] `ai/gemini.go`: `GeminiNarrator` with implicit context caching
+- [ ] Unit test: `GeminiNarrator` with a mocked HTTP transport
 
 ### API and WebSocket
 
