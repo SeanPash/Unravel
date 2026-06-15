@@ -77,6 +77,12 @@ type NarrationPayload struct {
 	Hypotheses     []string          `json:"hypotheses"`
 	Actions        []NarrationAction `json:"actions"`
 	Phases         []NarrationPhase  `json:"phases,omitempty"`
+	// Disclaimer is the honesty notice the UI surfaces alongside the narrative:
+	// this prose is AI-generated and must be verified before any action is taken
+	// on it. The engine sets it (it is not model-authored), so it is always
+	// present and consistent whether the live narrator or the stub produced the
+	// report. Optional in the schema for backward compatibility with older UIs.
+	Disclaimer string `json:"disclaimer,omitempty"`
 }
 
 // LogEventPayload carries the raw Splunk event behind a graph edge so the UI

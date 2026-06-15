@@ -40,6 +40,11 @@ type GeminiConfig struct {
 	// "Splunk MCP Server"), used as the activity source for the splunk_search
 	// tool so the feed honestly names the backend in use. Empty is fine.
 	SearcherName string
+	// NLGenerateSource is the human label for the backend that turns a
+	// natural-language question into SPL: the live path is the Splunk AI
+	// Assistant (SAIA) over the MCP Server; the replay path is a fixture-backed
+	// simulation and must say so. Empty defaults to "Splunk MCP Server / SAIA".
+	NLGenerateSource string
 }
 
 // GeminiNarrator calls the Gemini generateContent API with function-calling. A
@@ -154,7 +159,7 @@ const systemPrompt = `You are a senior incident-response analyst. An upstream ca
   "tactics": [<optional ordered ATT&CK tactic names>]
 }
 
-You have read-only tools to gather corroborating evidence from Splunk and threat intelligence. Use a tool when it would sharpen or confirm a finding; never invent data you did not retrieve.
+You have read-only tools to gather corroborating evidence from Splunk and threat intelligence. Use them deliberately: before you finalize, pull at least one piece of corroborating evidence for the most severe step in the chain (for example, look up the reputation of the process that dumped credentials, or pull the logon history for the account that reached the domain controller). Prefer the natural-language Splunk search when it is offered. Never invent data you did not retrieve, and never state as fact anything a tool did not confirm; downgrade unconfirmed claims to hypotheses.
 
 Respond with a SINGLE JSON object, no surrounding prose, matching EXACTLY this schema:
 
@@ -169,15 +174,15 @@ Respond with a SINGLE JSON object, no surrounding prose, matching EXACTLY this s
 }
 
 Field rules:
-- text: plain-language summary of what happened and why it matters. No jargon dumps.
+- text: a tight 2-4 sentence causal story - how the attack started, how it progressed step to step, and where it ended up - written so a duty manager understands the impact without reading the graph. State the through-line (entry point -> escalation -> objective), not a list of events. No jargon dumps.
 - severity: grounded in observed impact. Domain-controller compromise or credential theft is high or critical; isolated reconnaissance is low or medium.
-- key_findings: the handful of observations that matter most, each concrete and tied to evidence in the steps (name the process, host, account, or technique). Most important first.
-- affected_assets: the distinct hosts, accounts, and processes implicated, as short identifiers (for example "WS01", "administrator", "lsass.exe").
-- hypotheses: claims that go beyond the observed evidence - what an analyst should verify next, framed as suspected but unconfirmed activity.
-- actions: prioritized, imperative response steps an oncall responder can take now. Each entry has a priority, the action, and a one-line rationale. Order with "immediate" first.
+- key_findings: the handful of observations that matter most, each concrete and tied to specific evidence in the steps - name the exact process, host, account, and the ATT&CK technique id and name where the step carries one (for example "powershell.exe on WS01 read lsass.exe memory (T1003.001 OS Credential Dumping: LSASS Memory)"). Most important first. Cite tool results when a tool corroborated the finding.
+- affected_assets: the distinct hosts, accounts, and processes implicated, as short identifiers (for example "WS01", "administrator", "lsass.exe"). Only assets that actually appear in the steps or tool results.
+- hypotheses: specific, testable claims that go beyond the observed evidence and name the concrete next check - tie each to a real node, account, or technique in this chain (for example "the same Kerberos ticket may have authenticated to other hosts - pull 4769 events for NORTHPOLE\\Administrator across the domain"). Frame as suspected but unconfirmed. Do not pad with generic advice.
+- actions: prioritized, imperative containment steps an oncall responder can take now, each naming the specific asset or account from this chain. Each entry has a priority, the action, and a one-line rationale tying it to the observed activity. Order with "immediate" first.
 - phases: exactly one entry per distinct tactic among the steps (or per entry of the top-level tactics list when no step carries a tactic), in chronological order. The id is the kebab-case tactic name ("Credential Access" becomes "credential-access"); the title is the tactic name as given; the summary describes only that phase's steps.
 
-Stay concrete and grounded in the supplied steps and tool results. Do NOT invent node ids, edge ids, timestamps, or confidence values - the engine attaches those itself.`
+Stay concrete and grounded in the supplied steps and tool results. Do NOT invent node ids, edge ids, timestamps, or confidence values - the engine attaches those itself. Do NOT add a disclaimer field - the engine attaches the honesty notice itself.`
 
 // narratorToolDecls is the function-declaration menu sent to Gemini on every
 // narration request. The declarations are static, so they form part of the
@@ -313,7 +318,10 @@ func (c *GeminiNarrator) dispatchNLSearch(ctx context.Context, input map[string]
 		return `{"error":"missing question"}`
 	}
 
-	const genSource = "Splunk AI Assistant"
+	genSource := c.cfg.NLGenerateSource
+	if genSource == "" {
+		genSource = "Splunk MCP Server / SAIA"
+	}
 	genLabel := nlGenerateLabel(question)
 	emit.emit(types.AgentActivityPayload{Kind: "tool_call", Tool: "splunk_nl_search", Source: genSource, Label: genLabel})
 
@@ -523,5 +531,9 @@ func parseNarration(text string) (types.NarrationPayload, error) {
 	if out.Actions == nil {
 		out.Actions = []types.NarrationAction{}
 	}
+	// The disclaimer is engine-authored, not model-authored, so the honesty
+	// caveat is always present and worded consistently regardless of what the
+	// model returned (it is told not to emit one).
+	out.Disclaimer = NarrationDisclaimer
 	return out, nil
 }

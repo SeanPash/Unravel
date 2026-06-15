@@ -2440,11 +2440,31 @@ button.intel-technique-head-link:hover .intel-technique-name {
 }
 
 .phase-disclaimer {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
   margin: 14px 0 4px;
-  font-size: 10px;
-  font-style: italic;
-  color: var(--text-faint);
+  padding: 8px 10px;
+  font-size: 11px;
+  color: var(--text-muted);
   line-height: 1.5;
+  background: rgba(240, 180, 41, 0.06);
+  border-left: 2px solid var(--accent-amber);
+  border-radius: var(--radius);
+}
+
+.phase-disclaimer-tag {
+  flex: none;
+  font-family: var(--font-display);
+  font-size: 8.5px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--accent-amber);
+  border: 1px solid color-mix(in srgb, var(--accent-amber) 55%, transparent);
+  border-radius: 2px;
+  padding: 1px 5px;
+  white-space: nowrap;
 }
 
 /* Investigation trace: live AI agent tool-use feed */
@@ -2455,15 +2475,61 @@ button.intel-technique-head-link:hover .intel-technique-name {
 }
 
 .trace-disclaimer {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
   margin: 0 0 12px;
-  padding: 6px 10px;
+  padding: 7px 10px;
   font-size: 11px;
-  font-style: italic;
-  color: var(--text-faint);
-  background: rgba(157, 124, 216, 0.06);
+  line-height: 1.5;
+  color: var(--text-muted);
+  background: rgba(157, 124, 216, 0.07);
   border-left: 2px solid var(--accent-purple);
   border-radius: var(--radius);
 }
+
+.trace-disclaimer-tag {
+  flex: none;
+  font-family: var(--font-display);
+  font-size: 8.5px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--accent-purple);
+  border: 1px solid color-mix(in srgb, var(--accent-purple) 55%, transparent);
+  border-radius: 2px;
+  padding: 1px 5px;
+  white-space: nowrap;
+}
+
+/* Sources-consulted legend: an at-a-glance honest list of where the agents went,
+   color-coded by provenance family so a judge instantly sees the split between
+   Splunk's own data/AI and external catalogs. */
+.trace-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin: 0 0 12px;
+}
+
+.trace-legend-chip {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.01em;
+  padding: 2px 7px;
+  border-radius: 2px;
+  border: 1px solid currentColor;
+  background: color-mix(in srgb, currentColor 10%, transparent);
+  white-space: nowrap;
+}
+
+/* Provenance palette, shared by the legend chips and each row's source tag.
+   Splunk (local telemetry + Splunk AI) reads blue; MITRE ATT&CK reads purple;
+   external vuln catalogs (CISA KEV / NVD) read amber. */
+.trace-src-splunk { color: var(--accent-blue-bright); }
+.trace-src-mitre { color: var(--accent-purple); }
+.trace-src-external { color: var(--accent-amber); }
+.trace-src-other { color: var(--text-muted); }
 
 .trace-empty {
   padding: 24px;
@@ -2637,8 +2703,10 @@ button.intel-technique-head-link:hover .intel-technique-name {
   font-weight: 700;
   letter-spacing: 0.06em;
   text-transform: uppercase;
-  color: var(--accent-blue-bright);
-  border: 1px solid var(--border);
+  /* color comes from the .trace-src-* provenance class on the same element */
+  color: var(--text-muted);
+  border: 1px solid color-mix(in srgb, currentColor 45%, transparent);
+  background: color-mix(in srgb, currentColor 9%, transparent);
   border-radius: 2px;
   padding: 1px 5px;
   white-space: nowrap;

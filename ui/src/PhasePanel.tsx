@@ -179,7 +179,7 @@ export function PhasePanel({ phases, activeFocusId, activeTechnique, narration, 
       )}
       {narration && narration.hypotheses.length > 0 && (
         <section className="phase-notes">
-          <h3>Missing evidence</h3>
+          <h3>Hypotheses and missing evidence</h3>
           <ul className="narration-hypotheses">
             {narration.hypotheses.map((h, i) => <li key={i}>{h}</li>)}
           </ul>
@@ -187,7 +187,7 @@ export function PhasePanel({ phases, activeFocusId, activeTechnique, narration, 
       )}
       {narration && narration.actions.length > 0 && (
         <section className="phase-notes">
-          <h3>Recommended actions</h3>
+          <h3>Containment actions</h3>
           <ol className="narr-actions">
             {narration.actions.map((a, i) => (
               <li key={i} className="narr-action">
@@ -202,7 +202,8 @@ export function PhasePanel({ phases, activeFocusId, activeTechnique, narration, 
         </section>
       )}
       <p className="phase-disclaimer">
-        Agent generated these findings. Make sure to verify them.
+        <span className="phase-disclaimer-tag">AI generated</span>
+        This narrative and the actions above were written by the AI narrator from the engine&apos;s causal chain. Verify before acting.
       </p>
     </div>
   )

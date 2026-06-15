@@ -58,6 +58,25 @@ type Config struct {
 	// another signal; only when the burst goes quiet does it walk the graph.
 	// Default is 250ms in production. Tests can lower it for snappier runs.
 	SignalDebounce time.Duration
+
+	// IdleTimeout, when > 0, auto-finalizes the incident: if no new source event
+	// arrives within this window, processEvents returns, which drains the
+	// pipeline and lets the binary shut down cleanly. This backs --incident-idle,
+	// the "the incident has gone quiet, wrap it up" signal. Zero (the default)
+	// disables the watchdog so the engine streams until the source closes or the
+	// context is canceled.
+	IdleTimeout time.Duration
+
+	// OnIdle, when set, is called once when the IdleTimeout fires, before
+	// processEvents returns. main.go uses it to log and trigger graceful
+	// shutdown. Ignored when IdleTimeout is zero.
+	OnIdle func()
+
+	// HostMap canonicalizes host identifiers as events are materialized, so the
+	// same machine seen under several aliases (short name, FQDN, IP) collapses
+	// onto one Host node. Keys are matched case-insensitively. Backs --host-map.
+	// Empty (the default) leaves host strings untouched.
+	HostMap map[string]string
 }
 
 // Pipeline owns the streaming goroutine and a worker that drains scorer signals.
@@ -102,15 +121,52 @@ func (p *Pipeline) Run(ctx context.Context) error {
 
 func (p *Pipeline) processEvents(ctx context.Context) {
 	events := p.cfg.Source.Events()
+
+	// Without an idle watchdog, block indefinitely on each event (the original
+	// behavior). With one, arm a timer that fires when the stream goes quiet for
+	// IdleTimeout, auto-finalizing the incident.
+	if p.cfg.IdleTimeout <= 0 {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case raw, ok := <-events:
+				if !ok {
+					return
+				}
+				p.handleRaw(raw)
+			}
+		}
+	}
+
+	idle := time.NewTimer(p.cfg.IdleTimeout)
+	defer idle.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case raw, ok := <-events:
 			if !ok {
-				return
+				// The source is exhausted (e.g. a finite replay). Rather than
+				// returning, keep the engine serving and let the idle timer
+				// auto-finalize the incident after the configured quiet period, so
+				// the demo shuts itself down cleanly once the timeline drains.
+				events = nil
+				continue
 			}
 			p.handleRaw(raw)
+			if !idle.Stop() {
+				select {
+				case <-idle.C:
+				default:
+				}
+			}
+			idle.Reset(p.cfg.IdleTimeout)
+		case <-idle.C:
+			if p.cfg.OnIdle != nil {
+				p.cfg.OnIdle()
+			}
+			return
 		}
 	}
 }
@@ -123,7 +179,7 @@ func (p *Pipeline) handleRaw(raw splunk.RawEvent) {
 		}
 		return
 	}
-	updates := materialize(p.cfg.Graph, parsed)
+	updates := materialize(p.cfg.Graph, parsed, p.cfg.HostMap)
 	for _, u := range updates {
 		if u.authKind != "" {
 			p.cfg.Scorer.SetAuthKind(u.edge, u.authKind)
@@ -475,16 +531,17 @@ func parse(raw splunk.RawEvent) (any, error) {
 // (4720/4728/4732/5136, accessed_credential edges from actor to principal).
 // Sysmon EID 3/10/11 and other WinSec/AD EIDs are parsed but not yet
 // materialized; see the per-event TODOs below.
-func materialize(g *graph.Graph, ev any) []edgeUpdate {
+func materialize(g *graph.Graph, ev any, hostMap map[string]string) []edgeUpdate {
 	switch e := ev.(type) {
 	case types.ProcessCreate:
-		parent := g.FindOrCreateNode(types.NodeKindProcess, processKey(e.Host, e.ParentPID), labelImage(e.ParentImage), map[string]any{
+		host := canonHost(hostMap, e.Host)
+		parent := g.FindOrCreateNode(types.NodeKindProcess, processKey(host, e.ParentPID), labelImage(e.ParentImage), map[string]any{
 			"pid":  e.ParentPID,
-			"host": e.Host,
+			"host": host,
 		})
-		child := g.FindOrCreateNode(types.NodeKindProcess, processKey(e.Host, e.PID), labelImage(e.Image), map[string]any{
+		child := g.FindOrCreateNode(types.NodeKindProcess, processKey(host, e.PID), labelImage(e.Image), map[string]any{
 			"pid":  e.PID,
-			"host": e.Host,
+			"host": host,
 			"user": e.User,
 		})
 		edge := g.AppendEdge(parent, child, types.EdgeKindSpawned, e.TS, 0, e.EventID)
@@ -492,24 +549,24 @@ func materialize(g *graph.Graph, ev any) []edgeUpdate {
 
 	case types.LogonSuccess:
 		// 4624: a principal authenticated to a host. user -> host.
-		return []edgeUpdate{authEdge(g, e.TargetDomain, e.TargetUser, e.Host, e.TS, e.EventID, logonAuthKind(e.LogonType, e.AuthPackage))}
+		return []edgeUpdate{authEdge(g, e.TargetDomain, e.TargetUser, canonHost(hostMap, e.Host), e.TS, e.EventID, logonAuthKind(e.LogonType, e.AuthPackage))}
 
 	case types.LogonFailure:
 		// 4625: a failed authentication attempt. Still a user->host auth edge so
 		// brute-force fans show up in the graph; tagged "failed" for the scorer.
-		return []edgeUpdate{authEdge(g, e.TargetDomain, e.TargetUser, e.Host, e.TS, e.EventID, "failed")}
+		return []edgeUpdate{authEdge(g, e.TargetDomain, e.TargetUser, canonHost(hostMap, e.Host), e.TS, e.EventID, "failed")}
 
 	case types.SpecialLogon:
 		// 4672: privileged logon (admin-equivalent rights assigned at logon).
-		return []edgeUpdate{authEdge(g, e.SubjectDomain, e.SubjectUser, e.Host, e.TS, e.EventID, "privileged")}
+		return []edgeUpdate{authEdge(g, e.SubjectDomain, e.SubjectUser, canonHost(hostMap, e.Host), e.TS, e.EventID, "privileged")}
 
 	case types.KerberosTGT:
 		// 4768: Kerberos TGT request. The DC issuing the ticket is the host.
-		return []edgeUpdate{authEdge(g, e.TargetDomain, e.TargetUser, e.Host, e.TS, e.EventID, "kerberos-tgt")}
+		return []edgeUpdate{authEdge(g, e.TargetDomain, e.TargetUser, canonHost(hostMap, e.Host), e.TS, e.EventID, "kerberos-tgt")}
 
 	case types.KerberosService:
 		// 4769: Kerberos service ticket request. user -> host (issuing DC).
-		return []edgeUpdate{authEdge(g, e.TargetDomain, e.TargetUser, e.Host, e.TS, e.EventID, "kerberos-service")}
+		return []edgeUpdate{authEdge(g, e.TargetDomain, e.TargetUser, canonHost(hostMap, e.Host), e.TS, e.EventID, "kerberos-service")}
 
 	case types.ADEvent:
 		return materializeADEvent(g, e)
@@ -611,6 +668,22 @@ func logonAuthKind(logonType int, authPackage string) string {
 		return strings.ToLower(strings.TrimSpace(authPackage))
 	}
 	return "logon"
+}
+
+// canonHost maps a raw host identifier to its canonical name via the --host-map
+// alias table, matching case-insensitively so DC01, dc01, and DC01.corp.local
+// all collapse onto the configured canonical host. An empty map or an unmapped
+// host returns the input unchanged (trimmed), so the default behavior is a
+// no-op.
+func canonHost(hostMap map[string]string, host string) string {
+	host = strings.TrimSpace(host)
+	if len(hostMap) == 0 || host == "" {
+		return host
+	}
+	if canon, ok := hostMap[strings.ToLower(host)]; ok {
+		return canon
+	}
+	return host
 }
 
 // principalKey builds a stable node key for a security principal. domain\user

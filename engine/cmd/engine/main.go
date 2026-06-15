@@ -17,6 +17,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -54,6 +55,19 @@ type config struct {
 	hecToken       string
 	hecIndex       string
 	hecSourcetype  string
+
+	// Incident-scoping flags (the incident-triggered-pivot story). earliest and
+	// latest are the canonical time bounds; --splunk-earliest/--splunk-latest
+	// remain accepted aliases reconciled in parseFlags. incidentWindow scopes a
+	// run to a trailing time window; incidentIdle auto-finalizes the incident
+	// after the stream goes quiet; retention age-bounds the live graph; hostMap
+	// canonicalizes host aliases onto one node.
+	earliest       string
+	latest         string
+	incidentWindow time.Duration
+	incidentIdle   time.Duration
+	retention      time.Duration
+	hostMap        string
 }
 
 func main() {
@@ -79,8 +93,14 @@ func parseFlags() config {
 	flag.StringVar(&cfg.splunkURL, "splunk-url", "https://localhost:8089", "Splunk REST base URL (live mode)")
 	flag.StringVar(&cfg.splunkToken, "splunk-token", "", "Splunk bearer token (live mode; env SPLUNK_TOKEN)")
 	flag.StringVar(&cfg.splunkQuery, "splunk-search", "search index=sysmon", "Splunk search expression (live mode)")
-	flag.StringVar(&cfg.splunkEarliest, "splunk-earliest", "rt", "Splunk earliest_time bound for the live export (e.g. rt, -15m, or an absolute time); empty replays all history")
-	flag.StringVar(&cfg.splunkLatest, "splunk-latest", "", "Splunk latest_time bound for the live export (empty means open-ended)")
+	flag.StringVar(&cfg.splunkEarliest, "splunk-earliest", "rt", "alias for --earliest (Splunk earliest_time bound, e.g. rt, -15m, or an absolute time)")
+	flag.StringVar(&cfg.splunkLatest, "splunk-latest", "", "alias for --latest (Splunk latest_time bound; empty means open-ended)")
+	flag.StringVar(&cfg.earliest, "earliest", "", "earliest_time bound for the incident window (e.g. rt, -15m, 2026-06-14T00:00:00Z); in replay, scopes the timeline; empty inherits --splunk-earliest")
+	flag.StringVar(&cfg.latest, "latest", "", "latest_time bound for the incident window (empty means open-ended); in replay, scopes the timeline; empty inherits --splunk-latest")
+	flag.DurationVar(&cfg.incidentWindow, "incident-window", 0, "scope the run to the trailing time window of activity, e.g. 30m (replay: last 30m of the timeline; live with no --earliest: earliest_time=-30m); 0 disables")
+	flag.DurationVar(&cfg.incidentIdle, "incident-idle", 0, "auto-finalize the incident and shut down cleanly after no new events for this long, e.g. 2m; 0 disables")
+	flag.DurationVar(&cfg.retention, "retention", 0, "evict graph nodes whose newest event is older than this age, swept periodically, e.g. 1h; 0 means unbounded")
+	flag.StringVar(&cfg.hostMap, "host-map", "", "comma-separated host alias=canonical pairs to collapse onto one node, e.g. \"dc01=DC01.corp.local,10.0.0.5=DC01.corp.local\"")
 	flag.StringVar(&cfg.splunkMCPURL, "splunk-mcp-url", "", "Splunk MCP Server endpoint URL; when set in live mode, narrator enrichment runs through the MCP server instead of REST")
 	flag.StringVar(&cfg.splunkMCPToken, "splunk-mcp-token", "", "Splunk MCP Server bearer token (required when --splunk-mcp-url is set; env SPLUNK_MCP_TOKEN)")
 	flag.BoolVar(&cfg.splunkInsecure, "splunk-insecure", false, "skip TLS verification for the Splunk REST/HEC/MCP endpoints (does NOT affect public NVD/CISA fetches)")
@@ -101,8 +121,40 @@ func parseFlags() config {
 		cfg.splunkInsecure = true
 	}
 
+	reconcileTimeBounds(&cfg)
 	applySecretEnvFallbacks(&cfg)
 	return cfg
+}
+
+// reconcileTimeBounds makes --earliest/--latest the canonical time bounds while
+// keeping --splunk-earliest/--splunk-latest as accepted aliases. An explicitly
+// set canonical flag always wins; otherwise the canonical value is seeded from
+// the alias (so the live source, which reads cfg.splunkEarliest/Latest, still
+// sees the right value) and vice versa, so both names end up holding the same
+// resolved bound regardless of which the operator typed.
+func reconcileTimeBounds(cfg *config) {
+	set := map[string]bool{}
+	flag.Visit(func(f *flag.Flag) { set[f.Name] = true })
+
+	switch {
+	case set["earliest"]:
+		// Canonical wins; mirror onto the alias so the live REST source honors it.
+		cfg.splunkEarliest = cfg.earliest
+	case set["splunk-earliest"]:
+		cfg.earliest = cfg.splunkEarliest
+	default:
+		// Neither set: canonical inherits the alias default ("rt").
+		cfg.earliest = cfg.splunkEarliest
+	}
+
+	switch {
+	case set["latest"]:
+		cfg.splunkLatest = cfg.latest
+	case set["splunk-latest"]:
+		cfg.latest = cfg.splunkLatest
+	default:
+		cfg.latest = cfg.splunkLatest
+	}
 }
 
 // applySecretEnvFallbacks fills empty token fields from the environment so
@@ -150,13 +202,18 @@ func run(cfg config, logger *slog.Logger) error {
 
 	// Bound live memory growth when requested: evicting graph nodes also prunes
 	// the scorer's per-node/per-edge state so the two stay consistent.
-	if cfg.maxNodes > 0 {
+	if cfg.maxNodes > 0 || cfg.retention > 0 {
 		g.SetEvictionCallback(func(nodeIDs, edgeIDs []string) {
 			sc.PruneNodes(nodeIDs)
 			sc.PruneEdges(edgeIDs)
 		})
+	}
+	if cfg.maxNodes > 0 {
 		g.SetMaxNodes(cfg.maxNodes)
-		logger.Info("graph retention bound enabled", "max_nodes", cfg.maxNodes)
+		logger.Info("graph node-count bound enabled", "max_nodes", cfg.maxNodes)
+	}
+	if cfg.retention > 0 {
+		logger.Info("graph age retention enabled", "retention", cfg.retention)
 	}
 
 	bcast := api.NewBroadcaster()
@@ -167,7 +224,15 @@ func run(cfg config, logger *slog.Logger) error {
 		return fmt.Errorf("hec: %w", err)
 	}
 
-	p, err := pipeline.New(pipeline.Config{
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	hostMap := parseHostMap(cfg.hostMap)
+	if len(hostMap) > 0 {
+		logger.Info("host alias map enabled", "aliases", len(hostMap))
+	}
+
+	pcfg := pipeline.Config{
 		Source:      source,
 		Graph:       g,
 		Scorer:      sc,
@@ -176,7 +241,17 @@ func run(cfg config, logger *slog.Logger) error {
 		Broadcaster: bcast,
 		HEC:         hec,
 		Logger:      logger,
-	})
+		HostMap:     hostMap,
+		IdleTimeout: cfg.incidentIdle,
+	}
+	if cfg.incidentIdle > 0 {
+		logger.Info("incident idle auto-finalize enabled", "incident_idle", cfg.incidentIdle)
+		pcfg.OnIdle = func() {
+			logger.Info("incident idle timeout reached; finalizing and shutting down", "incident_idle", cfg.incidentIdle)
+			cancel()
+		}
+	}
+	p, err := pipeline.New(pcfg)
 	if err != nil {
 		return fmt.Errorf("pipeline: %w", err)
 	}
@@ -191,9 +266,6 @@ func run(cfg config, logger *slog.Logger) error {
 		api.WithAllowEmptyOrigin(loopback),
 	)
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
 	signals := make(chan os.Signal, 1)
 	signal.Notify(signals, syscall.SIGINT, syscall.SIGTERM)
 	go func() {
@@ -201,6 +273,10 @@ func run(cfg config, logger *slog.Logger) error {
 		logger.Info("shutdown requested")
 		cancel()
 	}()
+
+	if cfg.retention > 0 {
+		go runRetentionSweep(ctx, g, cfg.retention, logger)
+	}
 
 	startSource(source, ctx)
 
@@ -229,17 +305,36 @@ func buildSource(cfg config, tlsCfg *tls.Config) (splunk.Source, error) {
 		if len(timelines) == 0 {
 			return nil, fmt.Errorf("no timeline files matched %s/*.json", cfg.testdataDir)
 		}
-		return splunk.NewMockFromFiles(timelines, splunk.WithReplaySpeed(cfg.replaySpeed))
+		opts := []splunk.MockOption{splunk.WithReplaySpeed(cfg.replaySpeed)}
+		// In replay, the time bounds scope the canned timeline so the demo can show
+		// the incident-triggered pivot. "rt" / "now" are live-only Splunk tokens
+		// with no fixed instant, so they do not bound a recorded timeline; only
+		// absolute or clearly-relative bounds are applied.
+		earliest, hasEarliest := replayBound(cfg.earliest)
+		latest, hasLatest := replayBound(cfg.latest)
+		if hasEarliest || hasLatest {
+			opts = append(opts, splunk.WithTimeBounds(earliest, latest))
+		}
+		if cfg.incidentWindow > 0 {
+			opts = append(opts, splunk.WithIncidentWindow(cfg.incidentWindow))
+		}
+		return splunk.NewMockFromFiles(timelines, opts...)
 	case "live":
 		if cfg.splunkToken == "" {
 			return nil, fmt.Errorf("--splunk-token (or SPLUNK_TOKEN) is required in live mode")
+		}
+		earliest := cfg.earliest
+		// --incident-window without an explicit earliest sets a relative bound so
+		// the live export tails only the trailing window of activity.
+		if cfg.incidentWindow > 0 && !timeBoundExplicit(cfg.earliest) {
+			earliest = fmt.Sprintf("-%ds", int(cfg.incidentWindow.Seconds()))
 		}
 		return splunk.NewRESTSource(splunk.RESTConfig{
 			BaseURL:   cfg.splunkURL,
 			Token:     cfg.splunkToken,
 			Search:    cfg.splunkQuery,
-			Earliest:  cfg.splunkEarliest,
-			Latest:    cfg.splunkLatest,
+			Earliest:  earliest,
+			Latest:    cfg.latest,
 			Insecure:  cfg.splunkInsecure,
 			TLSConfig: tlsCfg,
 			Logger:    slog.Default(),
@@ -247,6 +342,113 @@ func buildSource(cfg config, tlsCfg *tls.Config) (splunk.Source, error) {
 	default:
 		return nil, fmt.Errorf("unknown --mode=%q (live | replay | ai-off)", cfg.mode)
 	}
+}
+
+// timeBoundExplicit reports whether a time-bound string names a concrete bound
+// (absolute or relative) rather than a live-only streaming token. "rt", "now",
+// and "" are not concrete instants, so an --incident-window may supply one.
+func timeBoundExplicit(s string) bool {
+	s = strings.TrimSpace(strings.ToLower(s))
+	switch s {
+	case "", "rt", "now", "rt-0", "+0", "-0":
+		return false
+	}
+	return true
+}
+
+// replayBound resolves a time-bound string to an absolute instant for scoping a
+// recorded replay timeline. Absolute RFC3339 times and Splunk-style relative
+// offsets ("-15m", "-2h", "-1d") are honored; live-only tokens (rt, now, empty)
+// yield ok=false so they impose no bound on a canned timeline. Relative offsets
+// are measured from wall-clock now, mirroring how Splunk evaluates them live.
+func replayBound(s string) (time.Time, bool) {
+	s = strings.TrimSpace(s)
+	if !timeBoundExplicit(s) {
+		return time.Time{}, false
+	}
+	for _, layout := range []string{time.RFC3339Nano, time.RFC3339, "2006-01-02 15:04:05", "2006-01-02"} {
+		if t, err := time.Parse(layout, s); err == nil {
+			return t.UTC(), true
+		}
+	}
+	if d, ok := parseSplunkRelative(s); ok {
+		return time.Now().UTC().Add(d), true
+	}
+	// Unrecognized but explicit: do not guess. Impose no replay bound rather than
+	// risk filtering the whole timeline out.
+	return time.Time{}, false
+}
+
+// parseSplunkRelative parses a leading-signed Splunk relative time like "-15m",
+// "-2h", or "-1d" into a Duration. Supported units: s, m, h, d. The "@" snap
+// suffix Splunk allows is ignored (we drop everything from "@" on). Returns
+// ok=false for anything it cannot parse.
+func parseSplunkRelative(s string) (time.Duration, bool) {
+	s = strings.ToLower(strings.TrimSpace(s))
+	if at := strings.IndexByte(s, '@'); at >= 0 {
+		s = s[:at]
+	}
+	if s == "" {
+		return 0, false
+	}
+	sign := time.Duration(1)
+	switch s[0] {
+	case '-':
+		sign = -1
+		s = s[1:]
+	case '+':
+		s = s[1:]
+	}
+	if s == "" {
+		return 0, false
+	}
+	unit := s[len(s)-1]
+	numStr := s[:len(s)-1]
+	mult, ok := map[byte]time.Duration{
+		's': time.Second,
+		'm': time.Minute,
+		'h': time.Hour,
+		'd': 24 * time.Hour,
+	}[unit]
+	if !ok {
+		return 0, false
+	}
+	n, err := strconv.Atoi(numStr)
+	if err != nil {
+		return 0, false
+	}
+	return sign * time.Duration(n) * mult, true
+}
+
+// parseHostMap parses the --host-map "alias=canonical,alias2=canonical" string
+// into a lowercase-keyed lookup table. Blank entries and entries missing "=" are
+// skipped. Returns nil for an empty spec so the pipeline treats it as a no-op.
+func parseHostMap(spec string) map[string]string {
+	spec = strings.TrimSpace(spec)
+	if spec == "" {
+		return nil
+	}
+	out := map[string]string{}
+	for _, pair := range strings.Split(spec, ",") {
+		pair = strings.TrimSpace(pair)
+		if pair == "" {
+			continue
+		}
+		eq := strings.IndexByte(pair, '=')
+		if eq <= 0 {
+			continue
+		}
+		alias := strings.TrimSpace(pair[:eq])
+		canon := strings.TrimSpace(pair[eq+1:])
+		if alias == "" || canon == "" {
+			continue
+		}
+		out[strings.ToLower(alias)] = canon
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 // loadSplunkTLS reads the optional --splunk-ca-cert PEM bundle into a tls.Config
@@ -350,6 +552,34 @@ func startSource(s splunk.Source, ctx context.Context) {
 	}
 }
 
+// runRetentionSweep periodically evicts graph nodes whose newest event is older
+// than the retention age. The sweep interval is a fraction of the retention
+// window (capped to a sane range) so eviction is timely without busy-looping.
+// It returns when ctx is canceled. The eviction callback registered in run()
+// keeps the scorer's per-node/per-edge state in step with each sweep.
+func runRetentionSweep(ctx context.Context, g *graph.Graph, retention time.Duration, logger *slog.Logger) {
+	interval := retention / 4
+	if interval < 15*time.Second {
+		interval = 15 * time.Second
+	}
+	if interval > 5*time.Minute {
+		interval = 5 * time.Minute
+	}
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			cutoff := time.Now().UTC().Add(-retention)
+			if n := g.PruneOlderThan(cutoff); n > 0 {
+				logger.Info("graph retention sweep evicted aged nodes", "evicted", n, "older_than", retention)
+			}
+		}
+	}
+}
+
 // buildHEC returns a nil HECSink (disabling write-back) when --hec-url is
 // unset, so replay and ai-off modes work without any Splunk instance.
 func buildHEC(cfg config, tlsCfg *tls.Config, logger *slog.Logger) (pipeline.HECSink, error) {
@@ -372,9 +602,14 @@ func buildHEC(cfg config, tlsCfg *tls.Config, logger *slog.Logger) (pipeline.HEC
 	return client, nil
 }
 
-// MCPSearcher is the only SplunkSearcher that also generates SPL via the Splunk
-// AI Assistant; this binding is what gates the narrator's splunk_nl_search tool.
-var _ ai.SPLGenerator = (*splunk.MCPSearcher)(nil)
+// Both the live MCPSearcher and the replay MockSearcher generate SPL via the
+// SPLGenerator seam; these bindings are what gate the narrator's
+// splunk_nl_search tool. The MockSearcher binding is why the SAIA loop is also
+// exercised (as an honestly-labeled replay fixture) in demo mode.
+var (
+	_ ai.SPLGenerator = (*splunk.MCPSearcher)(nil)
+	_ ai.SPLGenerator = (*splunk.MockSearcher)(nil)
+)
 
 func buildNarrator(cfg config, tlsCfg *tls.Config, logger *slog.Logger) ai.Narrator {
 	if cfg.mode == "ai-off" || cfg.apiKey == "" {
@@ -385,11 +620,16 @@ func buildNarrator(cfg config, tlsCfg *tls.Config, logger *slog.Logger) ai.Narra
 	}
 	var searcher ai.SplunkSearcher
 	var searcherName string
+	// nlGenSource honestly labels the natural-language-to-SPL backend in the
+	// activity feed: the live MCP path is the real Splunk AI Assistant (SAIA);
+	// the replay path is a fixture-backed simulation and says so.
+	var nlGenSource string
 	switch cfg.mode {
 	case "live":
 		if cfg.splunkMCPURL != "" {
 			searcher = splunk.NewMCPSearcher(cfg.splunkMCPURL, cfg.splunkMCPToken, cfg.splunkInsecure, tlsCfg, logger)
 			searcherName = "Splunk MCP Server"
+			nlGenSource = "Splunk MCP Server / SAIA"
 			logger.Info("narrator enrichment via Splunk MCP Server", "mcp_url", cfg.splunkMCPURL)
 		} else {
 			searcher = splunk.NewRESTSearcher(cfg.splunkURL, cfg.splunkToken, cfg.splunkInsecure, tlsCfg)
@@ -397,11 +637,15 @@ func buildNarrator(cfg config, tlsCfg *tls.Config, logger *slog.Logger) ai.Narra
 			logger.Info("narrator enrichment enabled", "splunk_url", cfg.splunkURL)
 		}
 	default:
+		// Replay/demo: the MockSearcher also implements ai.SPLGenerator, so the
+		// narrator's natural-language Splunk search (the SAIA loop) is exercised on
+		// stage. The labels make clear this is a replay fixture, not a live call.
 		searcher = splunk.NewMockSearcher(cfg.testdataDir)
-		searcherName = "Splunk (replay fixtures)"
+		searcherName = "Splunk MCP Server / SAIA (replay fixture)"
+		nlGenSource = "Splunk MCP Server / SAIA (replay fixture)"
 		logger.Info("narrator enrichment using mock fixtures", "testdata_dir", cfg.testdataDir)
 	}
-	return ai.NewGemini(ai.GeminiConfig{APIKey: cfg.apiKey, Searcher: searcher, SearcherName: searcherName})
+	return ai.NewGemini(ai.GeminiConfig{APIKey: cfg.apiKey, Searcher: searcher, SearcherName: searcherName, NLGenerateSource: nlGenSource})
 }
 
 // buildIntelAgent mirrors buildNarrator: ai-off or a missing API key yields the

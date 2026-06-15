@@ -326,6 +326,84 @@ func (g *Graph) evictLocked() {
 	}
 }
 
+// PruneOlderThan enforces an age-based retention bound: it evicts every node
+// whose most recent incident edge fired strictly before cutoff (and every edge
+// touching such a node), then compacts surviving adjacency lists and fires the
+// eviction callback once with the removed IDs. A node with no edges yet is
+// retained (it just arrived and has no age to judge). This backs the
+// --retention flag, which a background sweep calls periodically with
+// time.Now().Add(-retention). Returns the number of nodes evicted.
+//
+// Age is judged on edge event time (the security telemetry timeline), not wall
+// clock, so a replay of historical events prunes consistently with the data it
+// is replaying. The maxNodes (count) bound and this (age) bound are independent
+// and may both be active.
+func (g *Graph) PruneOlderThan(cutoff time.Time) int {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	cutoffUnix := cutoff.Unix()
+	victims := make([]string, 0)
+	for id := range g.nodes {
+		newest := int64(-1)
+		hasEdge := false
+		for _, e := range g.outEdges[id] {
+			hasEdge = true
+			if e.TS > newest {
+				newest = e.TS
+			}
+		}
+		for _, e := range g.inEdges[id] {
+			hasEdge = true
+			if e.TS > newest {
+				newest = e.TS
+			}
+		}
+		// A node with no edges has no age yet; keep it so a freshly created node
+		// is never evicted before its first edge lands.
+		if hasEdge && newest < cutoffUnix {
+			victims = append(victims, id)
+		}
+	}
+	if len(victims) == 0 {
+		return 0
+	}
+
+	evictedNodes := make([]string, 0, len(victims))
+	evictedEdges := make([]string, 0, len(victims))
+	victimSet := make(map[string]bool, len(victims))
+	for _, id := range victims {
+		victimSet[id] = true
+	}
+
+	for _, id := range victims {
+		for _, e := range g.outEdges[id] {
+			if _, ok := g.edges[e.ID]; ok {
+				evictedEdges = append(evictedEdges, e.ID)
+				delete(g.edges, e.ID)
+			}
+		}
+		for _, e := range g.inEdges[id] {
+			if _, ok := g.edges[e.ID]; ok {
+				evictedEdges = append(evictedEdges, e.ID)
+				delete(g.edges, e.ID)
+			}
+		}
+		delete(g.outEdges, id)
+		delete(g.inEdges, id)
+		delete(g.nodes, id)
+		delete(g.nodeLastSeen, id)
+		evictedNodes = append(evictedNodes, id)
+	}
+
+	g.compactAdjacencyLocked(victimSet)
+
+	if g.onEvict != nil && (len(evictedNodes) > 0 || len(evictedEdges) > 0) {
+		g.onEvict(evictedNodes, evictedEdges)
+	}
+	return len(evictedNodes)
+}
+
 // compactAdjacencyLocked drops, from every surviving node's in/out edge lists,
 // any edge whose endpoint was evicted (and is therefore no longer in g.edges).
 // Caller must hold g.mu for writing.
