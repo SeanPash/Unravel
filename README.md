@@ -9,7 +9,7 @@
 
 Built for the **Splunk Agentic Ops Hackathon** (Security track).
 
-> **Demo video:** _link added on the submission form before the deadline._
+> **Demo video:** [Unravel on Devpost](https://devpost.com/software/unravel-uhqay4)
 
 ---
 
