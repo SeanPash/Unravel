@@ -521,6 +521,16 @@ interface EdgeTooltip {
   y: number
 }
 
+// Hover label for a node: the full, un-abbreviated name the canvas never
+// shows, floated above the node in the same plated style as the edge tooltip.
+interface NodeTooltip {
+  label: string
+  kind: WsNode['kind']
+  color: string
+  x: number
+  y: number
+}
+
 // One open inspector drawer: which node, where the user has put it, and its
 // stacking height. z is a monotonic counter rather than an array position:
 // raising a panel must not reorder the DOM, because moving an element
@@ -611,6 +621,13 @@ export function GraphView({
   // the initial graph never renders collapsed on top of itself.
   const pendingResettle = useRef(false)
   const [edgeTooltip, setEdgeTooltip] = useState<EdgeTooltip | null>(null)
+  const [nodeTooltip, setNodeTooltip] = useState<NodeTooltip | null>(null)
+  // Node currently under the cursor, so the live simulation can keep its
+  // hover tooltip glued to the node as it drifts.
+  const hoverNodeRef = useRef<cytoscape.NodeSingular | null>(null)
+  // Bridge revealed by the focused node (as opposed to the hovered one), held
+  // so it can be re-hidden when focus moves or clears.
+  const focusBridgeRef = useRef<cytoscape.CollectionReturnValue | null>(null)
   const [mini, setMini] = useState<MinimapData | null>(null)
   // Minimap size tracks the graph panel (and therefore the screen): a fixed
   // fraction of the panel, clamped, with the height following the panel's
@@ -882,6 +899,12 @@ export function GraphView({
     // Hovering a node beside a hidden inter-incident bridge reveals the
     // whole bridge path while the pointer stays, and hovering any node
     // lights its incident's focus fog.
+    // Anchors the node hover tooltip just above the node body, in rendered
+    // (screen) coordinates so the DOM tooltip lines up with the canvas.
+    const nodeTipPos = (n: cytoscape.NodeSingular): { x: number; y: number } => {
+      const rp = n.renderedPosition()
+      return { x: rp.x, y: rp.y - n.renderedHeight() / 2 - 10 }
+    }
     let revealedBridge: cytoscape.CollectionReturnValue | null = null
     cy.on('mouseover', 'node', (e) => {
       const target = e.target as cytoscape.NodeSingular
@@ -904,6 +927,16 @@ export function GraphView({
         keep.addClass('hl')
       })
       hoverSectionRef.current = assignmentRef.current?.primary.get(target.id()) ?? null
+      if (containerRef.current) containerRef.current.style.cursor = 'pointer'
+      hoverNodeRef.current = target
+      const pos = nodeTipPos(target)
+      setNodeTooltip({
+        label: (target.data('label') as string) ?? (target.data('shortLabel') as string) ?? '',
+        kind: target.data('kind') as WsNode['kind'],
+        color: kindToColor(target.data('kind') as WsNode['kind']),
+        x: pos.x,
+        y: pos.y,
+      })
       recomputeMini()
     })
     cy.on('mouseout', 'node', () => {
@@ -915,8 +948,16 @@ export function GraphView({
           revealedBridge.filter('.bridge').addClass('bridge-hidden')
           revealedBridge = null
         }
+        // A focused node keeps its own bridge revealed; restore it after the
+        // hover re-hide above so leaving a node does not blank the focus link.
+        if (focusBridgeRef.current) {
+          focusBridgeRef.current.removeClass('bridge-hidden')
+        }
       })
       hoverSectionRef.current = null
+      if (containerRef.current) containerRef.current.style.cursor = ''
+      hoverNodeRef.current = null
+      setNodeTooltip(null)
       recomputeMini()
     })
 
@@ -972,6 +1013,17 @@ export function GraphView({
     })
     cy.on('render', () => {
       if (performance.now() - lastMiniAt.current > 200) recomputeMini()
+      // Track the hovered node as cola nudges it, so its tooltip never
+      // detaches. Only re-render on real movement to avoid per-frame churn.
+      const hn = hoverNodeRef.current
+      if (hn) {
+        const pos = nodeTipPos(hn)
+        setNodeTooltip((prev) => {
+          if (!prev) return prev
+          if (Math.abs(prev.x - pos.x) < 1.5 && Math.abs(prev.y - pos.y) < 1.5) return prev
+          return { ...prev, x: pos.x, y: pos.y }
+        })
+      }
     })
 
     // Idle-pan detection drives the auto-snap; programmatic camera moves
@@ -1316,11 +1368,31 @@ export function GraphView({
     if (!cy) return
     cy.batch(() => {
       cy.elements().removeClass('focus-hl focus-dim')
+      // Re-hide any bridge the previous focus revealed before recomputing.
+      if (focusBridgeRef.current) {
+        focusBridgeRef.current.filter('.bridge').addClass('bridge-hidden')
+        focusBridgeRef.current = null
+      }
     })
     if (!focusedNodeId) return
     const target = cy.getElementById(focusedNodeId)
     if (target.length === 0 || target.isParent()) return
-    const keep = target.closedNeighborhood()
+    let keep = target.closedNeighborhood()
+    // Clicking a node reveals the inter-incident bridge touching it, the same
+    // shared node hover surfaces, so the link to the next interval's graph
+    // stays visible while the node's inspector is open.
+    const bridgeNodes = target.neighborhood('node.bridge')
+    const bridgeEdges = target.connectedEdges('.bridge')
+    if (bridgeNodes.length > 0 || bridgeEdges.length > 0) {
+      const revealed = bridgeNodes
+        .union(bridgeEdges)
+        .union(bridgeNodes.connectedEdges())
+        .union(bridgeNodes.neighborhood())
+        .union(bridgeEdges.connectedNodes())
+      revealed.removeClass('bridge-hidden')
+      focusBridgeRef.current = revealed
+      keep = keep.union(revealed)
+    }
     cy.batch(() => {
       cy.elements().difference(keep).not(':parent').addClass('focus-dim')
       keep.addClass('focus-hl')
@@ -1699,6 +1771,20 @@ export function GraphView({
           />
         )
       })}
+      {nodeTooltip && (
+        <div
+          className="graph-node-tooltip"
+          style={{
+            left: nodeTooltip.x,
+            top: nodeTooltip.y,
+            borderBottomColor: nodeTooltip.color,
+          }}
+          role="tooltip"
+        >
+          <div className="graph-node-tooltip-name">{nodeTooltip.label}</div>
+          <div className="graph-node-tooltip-kind">{nodeTooltip.kind}</div>
+        </div>
+      )}
       {edgeTooltip && (
         <div
           className="graph-edge-tooltip"
