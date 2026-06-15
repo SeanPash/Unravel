@@ -68,7 +68,7 @@ React + Cytoscape.js UI
    - Structural lift: chains crossing host boundaries or touching sensitive nodes (DC, lsass) get a multiplier.
    Updates incrementally as new edges arrive.
 6. **Chain extractor.** When a connected subgraph crosses the suspicion threshold, runs a weighted backward walk from the highest-scored node to recover the maximally suspicious causal path. Output is an ordered list of events with per-step confidence.
-7. **AI narrator.** Sends the extracted chain (structured JSON) to Claude with a fixed system prompt and a cached engine-output schema preamble. Before narrating, it can issue agentic tool calls (up to 3 rounds) to enrich the chain - `lookup_process_reputation`, `get_account_logon_history`, `fetch_raw_events` - each of which builds an SPL query and runs it through a Splunk searcher. Returns plain-English narration, missing-evidence hypotheses, and a ranked list of containment actions.
+7. **AI narrator.** Sends the extracted chain (structured JSON) to Gemini 3.1 Flash Lite with a fixed system instruction and a static engine-output schema preamble that benefits from implicit context caching. Before narrating, it can issue agentic tool calls (up to 3 rounds) to enrich the chain - `lookup_process_reputation`, `get_account_logon_history`, `fetch_raw_events` - each of which builds an SPL query and runs it through a Splunk searcher. Returns plain-English narration, missing-evidence hypotheses, and a ranked list of containment actions.
 
 ### The AI Seam
 
@@ -85,7 +85,7 @@ The LLM is the last hop only. Structured engine output goes in; structured natur
 | WebSocket library | `github.com/gorilla/websocket` | Mature, widely used, simple upgrade/read/write API. |
 | UI framework | React 18 + Vite + TypeScript | Fast iteration, strong type safety, easy to test. |
 | Graph visualisation | Cytoscape.js | Mature, animates well, fits the 3-minute demo. |
-| AI model | Claude Sonnet 4.6 with prompt caching | Cost/latency profile suits ~3 call-sites per investigation; static schema preamble cached. |
+| AI model | Gemini 3.1 Flash Lite (Google) | Cost/latency profile suits ~3 call-sites per investigation; static schema preamble benefits from implicit context caching. |
 | Virtualized lab | GOAD (Game of Active Directory) | Ready-made multi-VM AD lab, purpose-built for this exact scenario. |
 | Attack runner | Python + Atomic Red Team atomics on a timer | Predictable, reproducible for demo recording. |
 | Test runner | `go test` and `vitest` | Standard tooling, no novel test infrastructure. |
@@ -98,7 +98,7 @@ The LLM is the last hop only. Structured engine output goes in; structured natur
 | Node types | Process | Process, Host, User, NetFlow |
 | Edge types | spawned | spawned, connected_to, authenticated_as, accessed_credential, dumped_memory_of, read_file |
 | Scoring | Frequency-rarity unigram | Frequency-rarity x temporal decay x structural lift |
-| AI narrator | Stub (canned output) | Claude Sonnet 4.6, 3 call-sites |
+| AI narrator | Stub (canned output) | Gemini 3.1 Flash Lite, 3 call-sites |
 | Splunk source | Mock (in-process) | Real REST tail client |
 | Persistence | In-memory only | In-memory + periodic BadgerDB snapshot |
 | Containment action | None | Splunk notable + stubbed EDR isolate API |
@@ -125,7 +125,7 @@ Phase 1 exists to prove the architecture end-to-end with a single vertical slice
 │   │   ├── scorer/                   suspicion scoring
 │   │   ├── chain/                    backward-walk chain extractor
 │   │   ├── splunk/                   Source + Searcher interfaces (Mock + REST), HEC client
-│   │   ├── ai/                       Narrator interface, Claude client, tool-use, stub
+│   │   ├── ai/                       Narrator interface, Gemini client, tool-use, stub
 │   │   ├── api/                      HTTP + WebSocket server, broadcaster, embedded static FS
 │   │   └── pipeline/                 wires the above into the streaming loop
 │   ├── testdata/                     canned event timelines + enrichment fixtures for replay

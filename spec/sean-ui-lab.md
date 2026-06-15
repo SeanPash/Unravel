@@ -338,7 +338,7 @@ Status snapshot (as of 2026-06-06): all UI components from the MVP exist with vi
 **Where:** depends on Luigi's L1 (embedded UI in the engine binary) being done first. Coordinate the merge order.
 
 - [ ] After Luigi's L1 lands, build the engine binary (`go build ./cmd/engine` from `engine/`).
-- [ ] Boot the lab (`vagrant up` in `lab/topology/`), point the engine binary at the lab Splunk: `./engine --mode=live --splunk-url=... --splunk-token=... --anthropic-key=$ANTHROPIC_API_KEY`.
+- [ ] Boot the lab (`vagrant up` in `lab/topology/`), point the engine binary at the lab Splunk: `./engine --mode=live --splunk-url=... --splunk-token=... --gemini-key=$GEMINI_API_KEY`.
 - [ ] In a second terminal, run `python lab/attack-runner/run.py --speed fast`.
 - [ ] Open `http://localhost:8080/` in a browser. Confirm the graph populates, the chain highlights when the threshold trips, and the narration panel fills in.
 - [ ] If the chain fires but narration looks weak, re-prompt with Luigi before changing the engine.
