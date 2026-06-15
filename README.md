@@ -94,7 +94,7 @@ If you just want to point Unravel at your own Splunk and watch it work, install 
 
 ```bash
 cd engine
-make install     # builds the binary and installs it to ~/.local/bin/unravel
+make install     # builds the UI + binary and installs unravel to ~/.local/bin
 unravel          # first run: a short menu
 ```
 

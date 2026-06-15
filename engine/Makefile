@@ -20,8 +20,11 @@ build:
 # Build the UI then the binary in one step.
 release: ui build
 
-# Build, then install onto the user's PATH (no sudo). Ensure ~/.local/bin is on PATH.
-install: build
+# Build the UI and binary, then install onto the user's PATH (no sudo). Depends on
+# release (not just build) so a fresh clone gets the UI embedded in one command.
+# Ensure ~/.local/bin is on PATH. To reinstall the binary only (e.g. after editing
+# gemini.key), run `make build && cp unravel $(HOME)/.local/bin/`.
+install: release
 	mkdir -p $(HOME)/.local/bin
 	cp unravel $(HOME)/.local/bin/unravel
 	@echo "Installed to $(HOME)/.local/bin/unravel - ensure ~/.local/bin is on your PATH, then run: unravel"
