@@ -174,8 +174,11 @@ describe('EngineSocket message dispatch', () => {
 
     const payload: NarrationPayload = {
       text: 'PowerShell accessed LSASS.',
+      severity: 'critical',
+      key_findings: ['PowerShell read LSASS memory on WS01'],
+      affected_assets: ['WS01', 'lsass.exe'],
       hypotheses: ['Credentials exfiltrated before network telemetry began'],
-      actions: ['Isolate WS01'],
+      actions: [{ priority: 'immediate', action: 'Isolate WS01', rationale: 'Entry point' }],
     }
     getInstances()[0].send({ type: 'narration', payload })
 
