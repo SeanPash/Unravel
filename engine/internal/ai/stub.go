@@ -20,10 +20,13 @@ func NewStub() *StubNarrator { return &StubNarrator{} }
 // Narrate ignores the context (the stub never blocks) and renders a
 // human-readable summary from the chain steps. The hypothesis and action lists
 // are intentionally generic so callers can spot the stub output in the UI. The
-// stub issues no tool calls, so it emits only a single terminal "done" step
-// (when emit is non-nil) to keep the activity feed coherent in ai-off mode.
+// stub makes no LLM or Splunk calls, so the activity it emits is an honest
+// description of the deterministic work it really performs: reading the chain
+// steps and the ATT&CK techniques the engine already mapped onto them. The
+// source labels say exactly that (a local, bundled snapshot, not a live feed)
+// so the Investigation feed stays truthful in ai-off mode.
 func (s *StubNarrator) Narrate(_ context.Context, chain types.ChainResultPayload, emit ActivityFunc) (types.NarrationPayload, error) {
-	emit.emit(types.AgentActivityPayload{Kind: "done", Label: "Stub narration (no live enrichment)"})
+	s.emitActivity(chain, emit)
 	if len(chain.Steps) == 0 {
 		return types.NarrationPayload{
 			Text:           "No chain available to narrate.",
@@ -53,6 +56,46 @@ func (s *StubNarrator) Narrate(_ context.Context, chain types.ChainResultPayload
 		Phases:     stubPhases(chain),
 		Disclaimer: stubDisclaimer,
 	}, nil
+}
+
+// emitActivity streams an honest, ordered trace of the stub's deterministic
+// synthesis so the Investigation feed populates in ai-off mode without claiming
+// any live enrichment. The sequence mirrors the live narrator's shape
+// (tool_call -> tool_result -> done) but every step describes work the engine
+// genuinely does offline: reading the reconstructed chain steps and the ATT&CK
+// techniques already mapped onto them by the deterministic mapper. The source
+// is the bundled, local snapshot, named as such. emit may be nil (no-op).
+func (s *StubNarrator) emitActivity(chain types.ChainResultPayload, emit ActivityFunc) {
+	if emit == nil {
+		return
+	}
+	const source = "local ATT&CK snapshot"
+	// Step 1: read the reconstructed chain the engine handed us.
+	stepLabel := "Reading the reconstructed causal chain"
+	emit.emit(types.AgentActivityPayload{Kind: "tool_call", Tool: "read_chain_steps", Source: source, Label: stepLabel})
+	stepDetail := "no chain steps"
+	stepStatus := "empty"
+	if len(chain.Steps) > 0 {
+		stepDetail = fmt.Sprintf("%d chain step(s) read", len(chain.Steps))
+		stepStatus = "ok"
+	}
+	emit.emit(types.AgentActivityPayload{Kind: "tool_result", Tool: "read_chain_steps", Source: source, Label: stepLabel, Detail: stepDetail, Status: stepStatus})
+
+	// Step 2: classify the chain's steps against the techniques the engine's
+	// deterministic mapper already assigned. This is a local reading, not a model
+	// inference, so the label and source say so.
+	techs := chainTechniques(chain)
+	classLabel := "Classifying steps against mapped ATT&CK techniques"
+	emit.emit(types.AgentActivityPayload{Kind: "tool_call", Tool: "classify_chain_techniques", Source: source, Label: classLabel})
+	classDetail := "no techniques mapped"
+	classStatus := "empty"
+	if len(techs) > 0 {
+		classDetail = fmt.Sprintf("%d technique(s): %s", len(techs), strings.Join(techs, ", "))
+		classStatus = "ok"
+	}
+	emit.emit(types.AgentActivityPayload{Kind: "tool_result", Tool: "classify_chain_techniques", Source: source, Label: classLabel, Detail: classDetail, Status: classStatus})
+
+	emit.emit(types.AgentActivityPayload{Kind: "done", Source: source, Label: "Deterministic narration ready (ai-off, no language model)"})
 }
 
 // stubDisclaimer is the honesty notice for ai-off / stub narration. It is

@@ -31,6 +31,14 @@ var rules = []rule{
 	// Script-host execution (generic spawn of a shell).
 	{"spawned", "", "powershell", Technique{"T1059.001", "PowerShell", "Execution"}},
 	{"spawned", "", "cmd.exe", Technique{"T1059.003", "Windows Command Shell", "Execution"}},
+	// Credential-dumping tool launched: a process spawned mimikatz to scrape
+	// secrets. This is the credential-access beat of the kill chain even when
+	// the LSASS read itself is not observed as its own edge.
+	{"spawned", "", "mimikatz", Technique{"T1003.001", "LSASS Memory", "Credential Access"}},
+	// Lateral movement: remote-execution tooling used to reach another host,
+	// e.g. wmic /node:<dc> ... or psexec \\<dc> ...
+	{"spawned", "", "wmic", Technique{"T1047", "Windows Management Instrumentation", "Lateral Movement"}},
+	{"spawned", "", "psexec", Technique{"T1021.002", "SMB/Windows Admin Shares", "Lateral Movement"}},
 	// Credential dumping from LSASS.
 	{"dumped_memory_of", "", "lsass", Technique{"T1003.001", "LSASS Memory", "Credential Access"}},
 	{"accessed_credential", "", "lsass", Technique{"T1003.001", "LSASS Memory", "Credential Access"}},

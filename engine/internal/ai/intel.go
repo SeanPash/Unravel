@@ -54,18 +54,40 @@ type DeterministicIntelAgent struct{}
 func NewDeterministicIntel() *DeterministicIntelAgent { return &DeterministicIntelAgent{} }
 
 func (a *DeterministicIntelAgent) Enrich(_ context.Context, chain types.ChainResultPayload, emit ActivityFunc) (types.ThreatIntelPayload, error) {
-	emit.emit(types.AgentActivityPayload{Kind: "done", Label: "ATT&CK snapshot only (no live enrichment)", Source: "MITRE ATT&CK"})
 	ids := chainTechniques(chain)
 	techs := make([]types.ThreatIntelTechnique, 0, len(ids))
 	for _, id := range ids {
-		techs = append(techs, techniqueIntelFromSnapshot(id))
+		ti := techniqueIntelFromSnapshot(id)
+		emitTechniqueLookup(emit, id, ti)
+		techs = append(techs, ti)
 	}
+	emit.emit(types.AgentActivityPayload{Kind: "done", Label: "ATT&CK snapshot correlation ready (no live enrichment)", Source: "local ATT&CK snapshot"})
 	return types.ThreatIntelPayload{
 		Status:     "ok",
 		Summary:    deterministicSummary(ids),
 		Techniques: techs,
 		CVEMatches: []types.CVEMatch{},
 	}, nil
+}
+
+// emitTechniqueLookup streams one honest tool_call -> tool_result pair for a
+// single technique resolved against the bundled ATT&CK snapshot. It mirrors the
+// live intel agent's lookup_technique_intel emission so the Investigation feed
+// has the same shape in ai-off mode, but the source is labeled "local ATT&CK
+// snapshot" because this path reads the bundled reference data, not a live API.
+// The detail summary is derived from the same toolResultActivity logic the live
+// path uses, fed the same marshaled technique payload, so the wording matches.
+// emit may be nil (no-op).
+func emitTechniqueLookup(emit ActivityFunc, id string, ti types.ThreatIntelTechnique) {
+	if emit == nil {
+		return
+	}
+	const source = "local ATT&CK snapshot"
+	label, _ := toolCallActivity("lookup_technique_intel", map[string]any{"technique_id": id})
+	emit.emit(types.AgentActivityPayload{Kind: "tool_call", Tool: "lookup_technique_intel", Source: source, Label: label})
+	b, _ := json.Marshal(ti)
+	detail, status := toolResultActivity("lookup_technique_intel", string(b))
+	emit.emit(types.AgentActivityPayload{Kind: "tool_result", Tool: "lookup_technique_intel", Source: source, Label: label, Detail: detail, Status: status})
 }
 
 func deterministicSummary(ids []string) string {
