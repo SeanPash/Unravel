@@ -15,38 +15,38 @@ Built for the **Splunk Agentic Ops Hackathon** (Security track).
 
 ## The problem
 
-A SOC analyst gets a Splunk alert: PowerShell ran on a workstation. That single event tells you almost nothing on its own. To know whether it matters, the analyst has to answer a chain of questions by hand:
+PowerShell ran on a workstation. Splunk fires the alert, and on its own that tells you next to nothing. To find out whether it matters, an analyst works through a chain of questions by hand:
 
 - What process spawned this PowerShell?
 - Did it touch credentials (LSASS, the SAM, a ticket cache)?
 - Did anything authenticate *off* the host afterward?
-- Did that authentication land on the Domain Controller?
+- Did that authentication reach the Domain Controller?
 
-Every answer lives in Splunk already, scattered across Sysmon, Windows Security, and Active Directory audit logs. Stitching it back into one story is 30+ minutes of manual pivoting per alert, and the clock is running while the intruder moves.
+The answers are all in Splunk already, spread across Sysmon, Windows Security, and Active Directory audit logs. Pulling them back into one story takes 30+ minutes of manual pivoting per alert, and the intruder keeps moving the whole time.
 
-Unravel does that stitching continuously and automatically. As events stream out of Splunk, it grows a typed provenance graph in memory, scores each new edge for suspicion against a learned baseline, and the moment a connected cluster crosses a threshold it walks backward to recover the single most suspicious causal path. Only then does an LLM get involved, to turn that path into plain English.
+Unravel does that stitching for you, continuously. Events stream out of Splunk, and the engine grows a typed provenance graph in memory, scores each new edge against a learned baseline, and the moment a connected cluster crosses a threshold it walks backward to recover the single most suspicious causal path. An LLM only enters at the end, to put that path into plain English.
 
-## Engine first, AI second
+## The engine does the work
 
-Seven subcomponents do the work. Six of them are pure Go with zero LLM calls: ingest, schema mapping, graph construction, temporal indexing, suspicion scoring, and chain extraction. The seventh, the narrator, is the only place an LLM is allowed to touch anything.
+Seven subcomponents do the work. Six are pure Go and never call a model: ingest, schema mapping, graph construction, temporal indexing, suspicion scoring, and chain extraction. The seventh, the narrator, is the only place an LLM touches anything.
 
-Run the engine with `--mode=ai-off` and the whole pipeline still ingests, builds the graph, scores it, and extracts the attack chain. You lose the English narration and nothing else.
+Pass `--mode=ai-off` and the pipeline still ingests, builds the graph, scores it, and extracts the chain. You lose the English narration. Nothing else changes.
 
 ## What it reconstructs
 
-1. A macro-enabled document is delivered by phishing (`T1566.001`)
+1. A macro-enabled document arrives by phishing (`T1566.001`)
 2. The macro spawns PowerShell (`T1059.001`)
 3. PowerShell reads LSASS memory and dumps credentials (`T1003.001`)
 4. A stolen ticket authenticates to the Domain Controller (`T1550.003`, pass-the-ticket)
 5. A domain-admin session opens on the DC (`T1078.002`)
 
-You watch the suspicion score climb and the causal graph assemble itself in the browser as each step fires. Each extracted step gets its MITRE ATT&CK technique and tactic from deterministic rules, not from a model.
+As each step fires, you watch the suspicion score climb and the causal graph assemble itself in the browser. Every extracted step picks up its MITRE ATT&CK technique and tactic from deterministic rules, not from a model.
 
 ## How it works
 
 ![Architecture](architecture.svg)
 
-Events flow left to right through seven stages. Only the last one calls a model.
+Events move left to right through seven stages. Only the last one calls a model.
 
 | # | Stage | What it does | LLM? |
 |---|-------|--------------|------|
@@ -55,40 +55,40 @@ Events flow left to right through seven stages. Only the last one calls a model.
 | 3 | **Graph builder** | Idempotently finds-or-creates `Process` / `Host` / `User` / `NetFlow` nodes and appends typed edges (`spawned`, `accessed_credential`, `dumped_memory_of`, `authenticated_as`, ...), each carrying timestamp, confidence, and source event ID | No |
 | 4 | **Temporal index** | Buckets edges by minute so "which edges touched node X in window [t1, t2]?" answers in `O(log n + k)` | No |
 | 5 | **Suspicion scorer** | Frequency-rarity (rare parent/child and auth tuples score high) × exponential temporal decay × structural lift for crossing host boundaries or touching sensitive nodes like `lsass.exe`. Updates incrementally and assigns stable incident IDs to connected components | No |
-| 6 | **Chain extractor** | When a component crosses the threshold, walks backward from the hottest node along highest-scored edges to recover the maximally suspicious path, then reverses it into chronological order with per-step confidence | No |
+| 6 | **Chain extractor** | When a component crosses the threshold, walks backward from the hottest node along highest-scored edges to recover the most suspicious path, then reverses it into chronological order with per-step confidence | No |
 | 7 | **AI narrator** | Turns the extracted chain into a 2-4 sentence narrative, missing-evidence hypotheses, and ranked containment actions | **Yes** |
 
-The graph lives in a custom in-memory adjacency structure and snapshots periodically to BadgerDB. The whole thing ships as one static Go binary with the React UI embedded inside it.
+The graph lives in a custom in-memory adjacency structure and snapshots to BadgerDB on a timer. Everything ships as one static Go binary with the React UI compiled inside it.
 
-Unravel is built to live inside Splunk in three distinct ways:
+Unravel talks to Splunk three ways:
 
-- **Live ingest** streams from Splunk's `services/search/jobs/export` REST endpoint in tail mode, so the engine consumes indexed events as they land.
-- **HEC write-back** returns the engine's reconstructed chain results to Splunk as notable events over the HTTP Event Collector when you point it at a `--hec-url`, so an analyst can pivot from the engine's output straight back into raw logs.
-- **Splunk MCP Server** is the AI narrator's evidence-gathering channel in live mode. When `--splunk-mcp-url` is set, every tool call the narrator makes to enrich its own context runs through the official Splunk MCP Server rather than the raw REST search endpoint.
+- **Live ingest** tails the `services/search/jobs/export` REST endpoint, so the engine reads indexed events as they land.
+- **HEC write-back** posts the reconstructed chain back to Splunk as notable events over the HTTP Event Collector when you set `--hec-url`, so an analyst can pivot from the engine's output straight into the raw logs.
+- **Splunk MCP Server** is how the narrator gathers evidence in live mode. Set `--splunk-mcp-url` and every tool call the narrator makes to enrich itself routes through the official Splunk MCP Server rather than the raw REST search endpoint.
 
 ## How the AI is used
 
 ![AI agent architecture](ai-architecture.svg)
 
-The diagram above is the deep-dive companion to the top-level [architecture.svg](architecture.svg): it zooms into the AI seam and shows exactly how the two agents work, the tool-use loop, the read-only SPL guard, the Splunk MCP/SAIA routing, and the deterministic fallbacks.
+This diagram is the companion to the top-level [architecture.svg](architecture.svg). It zooms into the AI seam: the two agents, the tool-use loop, the read-only SPL guard, the Splunk MCP/SAIA routing, and the deterministic fallbacks.
 
-Two agents sit at the seam, both built on Gemini 3.1 Flash Lite (Google). The static system-instruction prefix benefits from Gemini's implicit context caching:
+Two agents sit at the seam, both running on Gemini 3.1 Flash Lite (Google). The static system-instruction prefix benefits from Gemini's implicit context caching.
 
-**Narrator.** Receives the extracted chain as structured JSON. Before it writes a word, it can run up to three rounds of tool calls to enrich its own context, and each tool builds and runs a real SPL query through a Splunk searcher:
+The narrator receives the extracted chain as structured JSON. Before it writes a word, it can run up to three rounds of tool calls to enrich its own context, and each tool builds and runs a real SPL query through a Splunk searcher:
 
 - `lookup_process_reputation` → `index=threat_intel process_name=...`
 - `get_account_logon_history` → `index=winsec (EventCode=4624 OR 4625) Account_Name=... earliest=-24h`
 - `fetch_raw_events` → pulls the raw logs behind specific event IDs
 
-**Threat-intel agent.** Enriches the chain's techniques against live external sources, again via tool calls: `lookup_technique_intel` (MITRE ATT&CK), `lookup_kev` (CISA Known Exploited Vulnerabilities), and `search_cve` (NVD). Returns matched techniques and CVEs with KEV/severity flags.
+The threat-intel agent enriches the chain's techniques against live external sources, again through tool calls: `lookup_technique_intel` (MITRE ATT&CK), `lookup_kev` (CISA Known Exploited Vulnerabilities), and `search_cve` (NVD). It returns matched techniques and CVEs with KEV and severity flags.
 
-**Routed through the Splunk MCP Server.** In live mode with `--splunk-mcp-url` set, the narrator's Splunk enrichment runs through the official Splunk MCP Server: each SPL query the narrator builds executes via the server's `splunk_run_query` tool over the MCP streamable-HTTP transport, instead of hitting the REST search endpoint directly. With MCP enabled the narrator also gains a `splunk_nl_search` tool: it hands a natural-language question to the Splunk AI Assistant (`saia_generate_spl`) to generate SPL, then runs that generated SPL back through `splunk_run_query`. The activity feed shows both sub-steps, the AI Assistant writing the SPL and the MCP server running it. The engine resolves the actual tool names from the server's `tools/list` on connect and degrades gracefully if the server renamed them or the AI Assistant is unlicensed.
+In live mode with `--splunk-mcp-url` set, the narrator's Splunk enrichment routes through the official Splunk MCP Server. Each SPL query it builds runs via the server's `splunk_run_query` tool over the MCP streamable-HTTP transport, instead of hitting the REST search endpoint directly. With MCP on, the narrator also picks up a `splunk_nl_search` tool: it hands a natural-language question to the Splunk AI Assistant (`saia_generate_spl`), gets SPL back, then runs that SPL through `splunk_run_query`. The activity feed shows both sub-steps, the AI Assistant writing the SPL and the MCP server running it. The engine resolves the actual tool names from the server's `tools/list` on connect, and degrades gracefully if the server renamed them or the AI Assistant is unlicensed.
 
-The model only ever enriches its own input. It never decides what the attack chain is; the Go engine has already settled that before the narrator runs. And if you have no API key, the narrator falls back to a deterministic stub and the intel agent falls back to a bundled ATT&CK snapshot, so every tab in the UI still works with zero keys.
+The model only ever enriches its own input. It never decides what the attack chain is; the Go engine has already settled that before the narrator runs. And if you have no API key, the narrator falls back to a deterministic stub and the intel agent to a bundled ATT&CK snapshot, so every tab in the UI still works with zero keys.
 
 ## Just type `unravel`
 
-If you just want to point Unravel at your own Splunk and watch it work, install it and run the wizard:
+To point Unravel at your own Splunk and watch it work, install it and run the wizard:
 
 ```bash
 cd engine
@@ -96,14 +96,24 @@ make install     # builds the UI + binary and installs unravel to ~/.local/bin
 unravel          # first run: a short menu
 ```
 
-The first run offers two paths:
+Windows has no `make`, so use the bundled `install.cmd`. It does the same work (build the UI, compile the binary, install it) with only `go` and `npm`, and because it's a batch file it needs no execution-policy change and no admin rights:
 
-- **Connect to my Splunk** asks for your Splunk REST URL, a bearer token (typed without echo), and whether the certificate is self-signed. It checks the connection, saves it to `~/.unravel/config.json` (file mode `0600`), launches live mode, and opens the UI in your browser.
-- **Try the demo** runs the canned kill chain in replay mode, no setup needed.
+```powershell
+cd engine
+.\install.cmd            # build + install unravel to %LOCALAPPDATA%\Unravel and add it to your PATH
+# Then open a NEW terminal so it picks up the updated PATH:
+unravel                  # first run: a short menu
+```
 
-After the first connect, just type `unravel` again and it reads the saved config and goes straight to the live UI. Run `unravel setup` any time to re-enter the wizard and change the connection. (`make install` puts the binary in `~/.local/bin`; make sure that directory is on your `PATH`.)
+In PowerShell you have to type the `.\` prefix (`.\install.cmd`); from `cmd.exe` plain `install.cmd` works too. It copies `unravel.exe` to `%LOCALAPPDATA%\Unravel` and, if that directory isn't already on your user PATH, adds it. PATH is read when a terminal starts, so open a new terminal before `unravel` resolves by name. Pass `rebuild` (`.\install.cmd rebuild`) to force a fresh build when you've changed the engine or UI.
 
-Narration can work out of the box: a Gemini API key may be embedded into the binary at build time. Drop it in `engine/gemini.key` (gitignored) before `make`, and the wizard path lights up the AI tabs with zero extra setup. A `--gemini-key` flag or `GEMINI_API_KEY` env var still overrides it. Note that a key compiled into a distributed binary is recoverable from it (for example with `strings`), so treat embedding as a convenience for a controlled audience, not as production secret management.
+If you want a Gemini key baked into the binary, build with the PowerShell script instead: `powershell -ExecutionPolicy Bypass -File .\build.ps1 -Install`. It's the only build path that reads `engine/gemini.key`, and `-Install` puts the binary in `~/.local/bin`. The `-ExecutionPolicy Bypass -File` prefix lets the script run where the default policy blocks unsigned scripts; it changes nothing permanently.
+
+The first run offers two paths. **Connect to my Splunk** asks for your Splunk REST URL, a bearer token (typed without echo), and whether the certificate is self-signed; it checks the connection, saves it to `~/.unravel/config.json` (file mode `0600`), launches live mode, and opens the UI in your browser. **Try the demo** runs the canned kill chain in replay mode with no setup.
+
+After the first connect, type `unravel` again and it reads the saved config and goes straight to the live UI. Run `unravel setup` any time to re-enter the wizard and change the connection. (`make install` puts the binary in `~/.local/bin`, so make sure that directory is on your `PATH`.)
+
+Narration can work out of the box: drop a Gemini API key in `engine/gemini.key` (gitignored) before `make` and it's compiled into the binary, so the wizard lights up the AI tabs with no extra setup. A `--gemini-key` flag or `GEMINI_API_KEY` env var overrides it; note that a baked-in key is recoverable from a distributed binary (for example with `strings`), so treat it as a convenience, not secret management.
 
 ## Quickstart
 
@@ -117,9 +127,18 @@ make release          # builds the React UI, then compiles it into the Go binary
 ./unravel --mode=replay
 ```
 
-Open <http://localhost:8080>. The engine replays the phishing-to-DC timeline through ingest, scoring, and chain extraction, and streams the graph and narration to your browser over WebSocket. Add a `GEMINI_API_KEY` to the environment for live narration, or run `--mode=ai-off` to skip the model entirely and watch the engine carry the demo on its own. With no key at all, the narrator falls back to a deterministic stub, so the full demo runs with zero keys.
+On Windows, run `run.cmd`. It's the zero-install path: first run builds the UI and binary in place (needs `go` and `npm`), later runs start instantly, and it then launches the replay demo and opens your browser. No execution-policy change, no PATH edit, no new terminal, no admin.
 
-Want to iterate on just the UI? `cd ui && npm install && npm run mock` starts a standalone WebSocket server that replays a fixture, no engine needed.
+```powershell
+cd engine
+.\run.cmd                # first run builds, then runs the replay demo at http://localhost:8080
+```
+
+In PowerShell you have to type the `.\` prefix (`.\run.cmd`); from `cmd.exe` plain `run.cmd` works too. Pass `rebuild` (`.\run.cmd rebuild`) to force a fresh build after changing the engine or UI. The script runs from `engine\`, so replay mode finds its `testdata\` automatically.
+
+Open <http://localhost:8080>. The engine replays the phishing-to-DC timeline through ingest, scoring, and chain extraction, and streams the graph and narration to your browser over WebSocket. Add a `GEMINI_API_KEY` to the environment for live narration, or run `--mode=ai-off` to skip the model and watch the engine carry the demo on its own. With no key at all, the narrator falls back to a deterministic stub, so the full demo runs with zero keys.
+
+Iterating on just the UI? `cd ui && npm install && npm run mock` starts a standalone WebSocket server that replays a fixture, no engine needed.
 
 ## Live mode
 
@@ -138,7 +157,7 @@ cd engine
   --insecure
 ```
 
-Passing any flag (including `--mode`) runs the engine directly and bypasses the wizard, so existing scripts and the commands above are unchanged. The wizard is only the front door for a bare `unravel` with no saved config.
+Any flag (including `--mode`) runs the engine directly and bypasses the wizard, so existing scripts and the commands above are unchanged. The wizard is only the front door for a bare `unravel` with no saved config.
 
 To route the narrator's Splunk enrichment through the official Splunk MCP Server instead of the REST search endpoint, add `--splunk-mcp-url` and `--splunk-mcp-token`. The MCP token is a separate per-app encrypted credential, not the same as `--splunk-token`.
 
@@ -150,13 +169,13 @@ cd engine
   --gemini-key=$GEMINI_API_KEY --insecure
 ```
 
-When MCP enrichment is enabled, the narrator can also call `splunk_nl_search`: it asks the Splunk MCP Server's AI Assistant (`saia_generate_spl`) to turn a natural-language question into SPL, then runs that SPL through `splunk_run_query`. The activity feed shows both sub-steps: the AI Assistant writing the SPL, then the MCP server running it. The tool appears only in live+MCP mode and requires the Splunk AI Assistant to be enabled on the instance.
+With MCP enrichment on, the narrator can also call `splunk_nl_search`: it asks the Splunk MCP Server's AI Assistant (`saia_generate_spl`) to turn a natural-language question into SPL, then runs that SPL through `splunk_run_query`. The activity feed shows both sub-steps, the AI Assistant writing the SPL and the MCP server running it. The tool appears only in live+MCP mode and needs the Splunk AI Assistant enabled on the instance.
 
 `--splunk-insecure` (alias `--insecure`) skips TLS verification for the self-signed certs that GOAD and most lab Splunk installs use. Drop it for an instance with a CA-signed certificate, or point `--splunk-ca-cert` at a PEM bundle for a corporate private CA. The `--hec-*` flags are optional; leave them off and the engine simply won't write findings back to Splunk.
 
 ## Run flags
 
-Every flag has a sensible default, so `./unravel --mode=replay` runs with no arguments. A bare `unravel` (no flags) instead opens the setup wizard or, with a saved `~/.unravel/config.json`, launches live mode directly. Secrets can be passed on the command line or through the matching environment variable; an explicit flag always wins, and `--gemini-key` also falls back to a key embedded at build time.
+Every flag has a sensible default, so `./unravel --mode=replay` runs with no further arguments. A bare `unravel` (no flags) instead opens the setup wizard or, with a saved `~/.unravel/config.json`, launches live mode directly. Pass secrets on the command line or through the matching environment variable; an explicit flag always wins, and `--gemini-key` also falls back to a key embedded at build time.
 
 | Flag | Env | Default | What it does |
 |------|-----|---------|--------------|
@@ -208,14 +227,9 @@ Every flag has a sensible default, so `./unravel --mode=replay` runs with no arg
 
 ## The UI
 
-The front end (React + Cytoscape.js, embedded in the engine binary) is built to make an investigation readable at a glance:
+The front end (React + Cytoscape.js, embedded in the engine binary) keeps an investigation readable at a glance. The provenance graph is live: nodes are colored by suspicion and edges appear in real time as Splunk events arrive. When the engine splits activity into distinct incidents, each gets its own labeled region, and a minimap shows the whole picture so you can scrub and pan.
 
-- **Live provenance graph** - nodes colored by suspicion, edges appearing in real time as Splunk events arrive.
-- **Incident map + minimap** - when the engine separates activity into distinct incidents, each gets its own labeled region; the minimap shows the whole picture and lets you scrub and pan.
-- **Time scrubber** - play, pause, and step through the attack chronologically; clicking an event focuses its node in the graph.
-- **Attack phase cards** - one card per MITRE tactic, with the AI's summary, confidence, and technique IDs. Click one to drive the camera, timeline, and logs to that phase.
-- **Node inspector** - pinnable, draggable drawers explaining a node's role in the chain, its phases and techniques, and its parent/child relationships.
-- **Logs and threat-intel panels** - the raw Splunk events behind any node, and the enriched ATT&CK/CVE context for the chain.
+A time scrubber plays, pauses, and steps through the chain chronologically; click an event and its node comes into focus. One attack-phase card per MITRE tactic carries the AI's summary, confidence, and technique IDs, and clicking a card drives the camera, timeline, and logs to that phase. Pinnable, draggable node drawers explain a node's role in the chain, its phases and techniques, and its parent/child relationships, with separate panels for the raw Splunk events behind any node and the enriched ATT&CK/CVE context for the chain.
 
 ## Operating modes
 
@@ -227,19 +241,15 @@ The front end (React + Cytoscape.js, embedded in the engine binary) is built to 
 
 ## How this maps to the hackathon
 
-**Track: Security.** Unravel reconstructs an active intrusion (phishing to domain compromise) from live Splunk telemetry and tells the analyst what happened, why it matters, and what to do, while the attack is still in progress.
+Unravel is a Security-track entry. It reconstructs an active intrusion (phishing to domain compromise) from live Splunk telemetry and tells the analyst what happened, why it matters, and what to do, while the attack is still in progress.
 
-**Splunk integration, three ways.**
+It uses Splunk three ways. It consumes by tailing the `services/search/jobs/export` REST endpoint, reading indexed events as they land. It writes back by posting reconstructed chains to the HTTP Event Collector as notable events, so an analyst pivots from the engine's output into the raw logs. And in live mode with `--splunk-mcp-url` set, the narrator's evidence-gathering runs through the official Splunk MCP Server: every SPL query it builds executes via the server's `splunk_run_query` tool over the MCP streamable-HTTP transport, with tool names resolved from `tools/list` on connect.
 
-- *Consume:* live ingest tails Splunk's `services/search/jobs/export` REST endpoint, so the engine reads indexed events as they land.
-- *Write back:* reconstructed chains are posted to Splunk over the HTTP Event Collector (HEC) as notable events, so an analyst pivots from the engine's output straight back into raw logs.
-- *Splunk MCP Server:* in live mode with `--splunk-mcp-url` set, the AI narrator's evidence-gathering runs through the official Splunk MCP Server. Every SPL query it builds executes via the server's `splunk_run_query` tool over the MCP streamable-HTTP transport, and tool names are resolved from the server's `tools/list` on connect.
+It also uses Splunk's hosted models. With MCP on, the narrator's `splunk_nl_search` tool hands a natural-language question to the Splunk AI Assistant's `saia_generate_spl` to generate SPL, then runs that SPL through `splunk_run_query`. The activity feed shows both sub-steps.
 
-**Splunk hosted models (Splunk AI Assistant / SAIA).** With MCP enabled, the narrator gains a `splunk_nl_search` tool: it hands a natural-language question to the Splunk AI Assistant's `saia_generate_spl` to generate SPL, then runs that generated SPL back through `splunk_run_query`. The activity feed shows both sub-steps, the AI Assistant writing the SPL and the MCP server running it.
+The narration LLM is Google Gemini 3.1 Flash Lite, used as an agent: it runs tool-use rounds to enrich its own context (process reputation, logon history, raw events, MITRE/KEV/NVD intel) before writing a word. Drop every key and the narrator falls back to a deterministic stub and the intel agent to a bundled ATT&CK snapshot, so every tab still works.
 
-**AI integration.** The narration LLM is Google Gemini 3.1 Flash Lite, used as an agent: it runs tool-use rounds to enrich its own context (process reputation, logon history, raw events, MITRE/KEV/NVD intel) before writing a word. With no keys at all, the narrator falls back to a deterministic stub and the intel agent to a bundled ATT&CK snapshot, so every tab still works.
-
-**Required deliverables.** Open-source license ([MIT](LICENSE)), this README with full setup and run instructions, and the architecture diagram ([architecture.svg](architecture.svg)) in the repo root showing the Splunk interaction, the AI seam, and the data flow between components, plus a deep-dive AI agent diagram ([ai-architecture.svg](ai-architecture.svg)) detailing the agents' tool-use loops, the read-only SPL guard, and the Splunk MCP/SAIA routing.
+The required deliverables are here: an open-source license ([MIT](LICENSE)), this README with full setup and run instructions, and the architecture diagram ([architecture.svg](architecture.svg)) in the repo root showing the Splunk interaction, the AI seam, and the data flow between components, plus a deep-dive AI agent diagram ([ai-architecture.svg](ai-architecture.svg)) detailing the agents' tool-use loops, the read-only SPL guard, and the Splunk MCP/SAIA routing.
 
 ## Repository layout
 
