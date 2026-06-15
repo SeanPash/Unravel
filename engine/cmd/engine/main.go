@@ -12,6 +12,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"io/fs"
 	"log/slog"
 	"net"
 	"net/http"
@@ -23,6 +24,7 @@ import (
 	"syscall"
 	"time"
 
+	engineroot "github.com/luigifernandez/unravel/engine"
 	"github.com/luigifernandez/unravel/engine/internal/ai"
 	"github.com/luigifernandez/unravel/engine/internal/api"
 	"github.com/luigifernandez/unravel/engine/internal/graph"
@@ -47,6 +49,7 @@ type config struct {
 	mode           string
 	bind           string
 	port           int
+	open           bool
 	apiToken       string
 	replaySpeed    float64
 	testdataDir    string
@@ -107,6 +110,12 @@ func main() {
 			logger.Error("setup failed", "err", err)
 			os.Exit(1)
 		}
+	}
+
+	// --open opts an explicit-flag invocation (e.g. --mode=replay --open, used by
+	// the Windows run.cmd) into the same browser auto-open a bare `unravel` does.
+	if cfg.open {
+		openBrowser = true
 	}
 
 	if openBrowser {
@@ -307,6 +316,7 @@ func parseFlags() (config, map[string]bool) {
 	flag.StringVar(&cfg.mode, "mode", "replay", "engine mode: live | replay | ai-off")
 	flag.StringVar(&cfg.bind, "bind", "127.0.0.1", "HTTP/WebSocket listen address")
 	flag.IntVar(&cfg.port, "port", 8080, "HTTP/WebSocket listen port")
+	flag.BoolVar(&cfg.open, "open", false, "open the demo in the default browser once the server is listening")
 	flag.StringVar(&cfg.apiToken, "api-token", os.Getenv("SPLUNK_UNRAVEL_API_TOKEN"), "shared bearer token required on the HTTP/WebSocket API (env SPLUNK_UNRAVEL_API_TOKEN; empty disables auth)")
 	flag.Float64Var(&cfg.replaySpeed, "replay-speed", 1.0, "timeline playback multiplier (replay mode)")
 	flag.StringVar(&cfg.testdataDir, "testdata", "testdata", "directory holding replay timelines")
@@ -403,6 +413,22 @@ func run(cfg config, logger *slog.Logger) error {
 
 	if cfg.mode == "live" {
 		probeSplunk(cfg, tlsCfg, logger)
+	}
+
+	// Replay/ai-off read fixtures from --testdata on disk. When that directory is
+	// absent (the installed `unravel` run from an arbitrary directory), fall back
+	// to the fixtures embedded in the binary so the demo still runs. Resolving here
+	// means both buildSource and buildNarrator below pick up the same directory.
+	if cfg.mode == "replay" || cfg.mode == "ai-off" {
+		resolved, cleanup, err := resolveReplayTestdata(cfg.testdataDir)
+		if err != nil {
+			return fmt.Errorf("replay fixtures: %w", err)
+		}
+		defer cleanup()
+		if resolved != cfg.testdataDir {
+			logger.Info("testdata directory not found; using replay fixtures embedded in the binary", "requested", cfg.testdataDir, "dir", resolved)
+		}
+		cfg.testdataDir = resolved
 	}
 
 	source, err := buildSource(cfg, tlsCfg)
@@ -876,7 +902,11 @@ func buildNarrator(cfg config, tlsCfg *tls.Config, logger *slog.Logger) ai.Narra
 		nlGenSource = "Splunk MCP Server / SAIA (replay fixture)"
 		logger.Info("narrator enrichment using mock fixtures", "testdata_dir", cfg.testdataDir)
 	}
-	return ai.NewGemini(ai.GeminiConfig{APIKey: cfg.apiKey, Searcher: searcher, SearcherName: searcherName, NLGenerateSource: nlGenSource})
+	// Wrap the live narrator so any model/API failure degrades to the stub
+	// instead of leaving the incident with no narration. The demo (and a live
+	// run) keeps a populated narration panel even when Gemini is unreachable.
+	gem := ai.NewGemini(ai.GeminiConfig{APIKey: cfg.apiKey, Searcher: searcher, SearcherName: searcherName, NLGenerateSource: nlGenSource})
+	return ai.NewFallback(gem, ai.NewStub())
 }
 
 // buildIntelAgent mirrors buildNarrator: ai-off or a missing API key yields the
@@ -895,6 +925,54 @@ func buildIntelAgent(cfg config, logger *slog.Logger) ai.ThreatIntelAgent {
 	source := intel.NewRESTSource(intel.RESTConfig{NVDKey: cfg.nvdKey})
 	logger.Info("threat-intel agent enrichment using live KEV/NVD", "mode", cfg.mode)
 	return ai.NewGeminiIntel(ai.GeminiIntelConfig{APIKey: cfg.apiKey, Source: source})
+}
+
+// resolveReplayTestdata ensures replay/ai-off modes have their fixtures on disk.
+// When dir actually contains a timeline (the normal case when run from the engine
+// source tree, or any explicit --testdata path), it is used as-is and cleanup is a
+// no-op. Otherwise the fixtures embedded in the binary are materialized into a
+// fresh temp directory so the installed `unravel` runs its demo from ANY working
+// directory. The returned cleanup removes that temp directory.
+func resolveReplayTestdata(dir string) (string, func(), error) {
+	noop := func() {}
+	if timelines, err := discoverTimelines(dir); err == nil && len(timelines) > 0 {
+		return dir, noop, nil
+	}
+	tmp, err := os.MkdirTemp("", "unravel-replay-")
+	if err != nil {
+		return "", noop, fmt.Errorf("create temp testdata: %w", err)
+	}
+	cleanup := func() { _ = os.RemoveAll(tmp) }
+	if err := extractReplayFS(tmp); err != nil {
+		cleanup()
+		return "", noop, fmt.Errorf("materialize embedded fixtures: %w", err)
+	}
+	return tmp, cleanup, nil
+}
+
+// extractReplayFS writes every fixture embedded in engineroot.ReplayFS under
+// root, preserving the layout the replay loaders expect: the timeline at the top
+// level and the enrichment fixtures under root/enrichment/. The leading
+// "testdata/" embed prefix is stripped so the files land directly under root.
+func extractReplayFS(root string) error {
+	return fs.WalkDir(engineroot.ReplayFS, "testdata", func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel := strings.TrimPrefix(strings.TrimPrefix(p, "testdata"), "/")
+		target := filepath.Join(root, rel)
+		if d.IsDir() {
+			return os.MkdirAll(target, 0o755)
+		}
+		data, err := engineroot.ReplayFS.ReadFile(p)
+		if err != nil {
+			return err
+		}
+		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+			return err
+		}
+		return os.WriteFile(target, data, 0o644)
+	})
 }
 
 // discoverTimelines returns every root-level chain-*.json file in dir (the
