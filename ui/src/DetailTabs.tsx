@@ -57,7 +57,7 @@ export function DetailTabs(props: DetailTabsProps) {
             role="tab"
             type="button"
             aria-selected={activeTab === t.id}
-            className={`detail-tab${activeTab === t.id ? ' detail-tab-active' : ''}`}
+            className={`detail-tab detail-tab-${t.id}${activeTab === t.id ? ' detail-tab-active' : ''}`}
             onClick={() => onTabChange(t.id)}
           >
             {t.label}
@@ -83,6 +83,7 @@ export function DetailTabs(props: DetailTabsProps) {
             activity={props.activity}
             busy={props.agentsBusy}
             hasChain={props.hasChain}
+            onNavigate={onTabChange}
           />
         )}
         {activeTab === 'logs' && (

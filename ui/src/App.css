@@ -2064,22 +2064,30 @@
   color: var(--text-muted);
 }
 
-/* Tab accent colors: ATT&CK=red, Intel=purple. Logs stays neutral: the log
+/* Tab accent colors, keyed to each tab's identity (not its position) so adding
+   or reordering tabs can never leave one without an active indicator:
+   Investigation=blue, ATT&CK=red, Intel=purple. Logs stays neutral: the log
    rows below rotate through every phase accent, so a colored tab would read
    as part of the log content. */
-.detail-tab:nth-child(1).detail-tab-active {
+.detail-tab-trace.detail-tab-active {
+  color: var(--accent-blue-bright);
+  border-bottom-color: var(--accent-blue-bright);
+  background: rgba(96, 165, 250, 0.06);
+}
+
+.detail-tab-logs.detail-tab-active {
   color: var(--text-primary);
   border-bottom-color: var(--text-primary);
   background: rgba(255, 255, 255, 0.04);
 }
 
-.detail-tab:nth-child(2).detail-tab-active {
+.detail-tab-attack.detail-tab-active {
   color: var(--accent-red);
   border-bottom-color: var(--accent-red);
   background: rgba(220, 78, 65, 0.05);
 }
 
-.detail-tab:nth-child(3).detail-tab-active {
+.detail-tab-intel.detail-tab-active {
   color: var(--accent-purple);
   border-bottom-color: var(--accent-purple);
   background: rgba(157, 124, 216, 0.05);
@@ -2495,6 +2503,46 @@ button.intel-technique-head-link:hover .intel-technique-name {
 .trace-step-empty { border-left-color: var(--text-faint); }
 .trace-step-error { border-left-color: var(--accent-red); }
 .trace-step-kind-done { border-left-color: var(--accent-purple); }
+
+/* Clickable rows jump to the detail tab that holds the step's findings. */
+.trace-step-nav {
+  cursor: pointer;
+  transition: background 0.12s ease, border-color 0.12s ease;
+}
+.trace-step-nav:hover {
+  background: rgba(255, 255, 255, 0.03);
+  border-color: var(--accent-blue-bright);
+}
+.trace-step-nav:focus-visible {
+  outline: none;
+  border-color: var(--accent-blue-bright);
+  box-shadow: 0 0 0 2px rgba(96, 165, 250, 0.35);
+}
+
+/* "View in Logs >" affordance, revealed on hover/focus of a clickable row. */
+.trace-step-go {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: auto;
+  font-family: var(--font-display);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--accent-blue-bright);
+  white-space: nowrap;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+.trace-step-nav:hover .trace-step-go,
+.trace-step-nav:focus-visible .trace-step-go {
+  opacity: 1;
+}
+@media (hover: none) {
+  /* Touch devices have no hover, so keep the affordance always visible. */
+  .trace-step-go { opacity: 0.7; }
+}
 
 @keyframes trace-in {
   from { opacity: 0; transform: translateY(6px); }
